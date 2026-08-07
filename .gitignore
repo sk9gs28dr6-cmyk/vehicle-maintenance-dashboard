@@ -1,0 +1,6 @@
+# personal vehicle data — never publish this
+data.json
+
+# OS junk
+Thumbs.db
+.DS_Store

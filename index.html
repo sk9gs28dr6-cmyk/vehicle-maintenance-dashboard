@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Garage — Vehicle Maintenance Dashboard</title>
+<link rel="stylesheet" href="style.css">
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2563eb">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Garage">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🚗</span>
+      <div>
+        <h1>Garage</h1>
+        <p class="sub">Vehicle maintenance dashboard</p>
+      </div>
+    </div>
+
+    <div class="vehicle-switcher">
+      <select id="vehicleSelect"></select>
+      <button id="addVehicleBtn" class="btn btn-small">+ Add Vehicle</button>
+      <button id="editVehicleBtn" class="btn btn-small">Edit</button>
+    </div>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="add">Add Record</button>
+      <button class="tab-btn" data-tab="history">History</button>
+      <button class="tab-btn" data-tab="settings">Settings</button>
+    </nav>
+  </header>
+
+  <main>
+
+    <!-- DASHBOARD -->
+    <section id="tab-dashboard" class="tab-panel active">
+      <div class="dash-grid">
+        <div class="card odometer-card">
+          <div class="card-label">Current Odometer</div>
+          <div class="odometer-value" id="currentOdoDisplay">—</div>
+          <div class="odo-edit-row">
+            <input type="number" id="quickOdoInput" placeholder="Update mileage">
+            <button id="quickOdoSave" class="btn btn-small">Update</button>
+          </div>
+        </div>
+        <div class="card summary-card">
+          <div class="card-label">Total Records</div>
+          <div class="summary-value" id="totalRecords">0</div>
+        </div>
+        <div class="card summary-card">
+          <div class="card-label">Total Spent</div>
+          <div class="summary-value" id="totalSpent">$0</div>
+        </div>
+        <div class="card summary-card">
+          <div class="card-label">Overdue Items</div>
+          <div class="summary-value danger" id="overdueCount">0</div>
+        </div>
+      </div>
+
+      <h2 class="section-title">Maintenance Recommendations</h2>
+      <div id="recommendations" class="reco-list"></div>
+    </section>
+
+    <!-- ADD RECORD -->
+    <section id="tab-add" class="tab-panel">
+      <div class="add-grid">
+        <div class="card upload-card">
+          <h2 class="section-title">1. Upload Invoice Photo</h2>
+          <label class="dropzone" id="dropzone">
+            <input type="file" id="fileInput" accept="image/*" hidden>
+            <span id="dropzoneText">📷 Click or drag an invoice photo here</span>
+          </label>
+
+          <div id="cropperWrap" class="cropper-wrap" hidden>
+            <p class="hint">Drag a box around just the invoice text for better accuracy, then scan. Or scan the whole image.</p>
+            <div class="cropper-stage" id="cropperStage">
+              <img id="cropperImg">
+              <div id="cropRect" class="crop-rect" hidden></div>
+            </div>
+            <div class="cropper-actions">
+              <button type="button" id="scanCroppedBtn" class="btn btn-primary" disabled>Scan Cropped Area</button>
+              <button type="button" id="scanFullBtn" class="btn">Scan Full Image</button>
+              <button type="button" id="clearCropBtn" class="btn btn-small">Clear Selection</button>
+            </div>
+          </div>
+
+          <div id="ocrStatus" class="ocr-status"></div>
+          <progress id="ocrProgress" value="0" max="1" hidden></progress>
+        </div>
+
+        <div class="card form-card">
+          <h2 class="section-title">2. Confirm Details</h2>
+          <form id="recordForm">
+            <label>Service date
+              <input type="date" id="fServiceDate" required>
+            </label>
+            <label>Mileage at service
+              <input type="number" id="fMileage" placeholder="e.g. 52340" required>
+            </label>
+            <label>Cost ($)
+              <input type="number" step="0.01" id="fCost" placeholder="e.g. 89.99">
+            </label>
+            <label>Service type(s)</label>
+            <div class="chip-select" id="serviceChips"></div>
+            <label>Shop / notes
+              <input type="text" id="fNotes" placeholder="e.g. Jiffy Lube - Main St">
+            </label>
+            <details class="raw-text-details">
+              <summary>Raw OCR text (for reference)</summary>
+              <textarea id="fRawText" rows="6" placeholder="OCR text will appear here after upload…"></textarea>
+            </details>
+            <button type="submit" class="btn btn-primary">Save Record</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- HISTORY -->
+    <section id="tab-history" class="tab-panel">
+      <h2 class="section-title">Service History</h2>
+      <div class="table-wrap">
+        <table id="historyTable">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Mileage</th>
+              <th>Service(s)</th>
+              <th>Cost</th>
+              <th>Notes</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+        <p id="historyEmpty" class="empty-msg">No records yet. Add your first invoice in the "Add Record" tab.</p>
+      </div>
+      <div class="io-row">
+        <button id="shareBackupBtn" class="btn btn-primary" hidden>📤 Share Backup</button>
+        <button id="exportBtn" class="btn">Export JSON</button>
+        <label class="btn file-btn">Import JSON
+          <input type="file" id="importInput" accept="application/json" hidden>
+        </label>
+      </div>
+      <p class="hint" id="shareBackupHint"></p>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="tab-panel">
+      <h2 class="section-title">Vehicles</h2>
+      <div class="table-wrap">
+        <table id="vehiclesTable">
+          <thead><tr><th>Nickname</th><th>Make/Model/Year</th><th>Odometer</th><th></th></tr></thead>
+          <tbody id="vehiclesBody"></tbody>
+        </table>
+      </div>
+      <button id="addVehicleBtn2" class="btn btn-primary">+ Add Vehicle</button>
+
+      <h2 class="section-title">Maintenance Intervals</h2>
+      <p class="hint">Shared across all vehicles. Leave a field blank to ignore that dimension.</p>
+      <div class="table-wrap">
+        <table id="intervalsTable">
+          <thead>
+            <tr><th>Service Type</th><th>Every (miles)</th><th>Every (months)</th></tr>
+          </thead>
+          <tbody id="intervalsBody"></tbody>
+        </table>
+      </div>
+      <button id="saveIntervals" class="btn btn-primary">Save Intervals</button>
+      <button id="resetIntervals" class="btn">Reset to Defaults</button>
+
+      <h2 class="section-title">Email Reminders</h2>
+      <div class="card">
+        <p class="hint" id="emailStatusHint">Checking status…</p>
+        <label>Send reminders to
+          <input type="email" id="sEmailTo" placeholder="you@example.com">
+        </label>
+        <div class="btn-row">
+          <button id="saveEmailSettings" class="btn btn-primary">Save</button>
+          <button id="sendTestEmailBtn" class="btn">Send Test Email Now</button>
+        </div>
+        <p class="ocr-status" id="testEmailResult"></p>
+      </div>
+
+      <h2 class="section-title danger-zone">Danger Zone</h2>
+      <button id="clearAllBtn" class="btn btn-danger">Clear All Data</button>
+    </section>
+
+  </main>
+</div>
+
+<!-- Add / Edit Vehicle modal -->
+<div id="vehicleModal" class="modal-overlay" hidden>
+  <div class="modal-card">
+    <h2 id="vehicleModalTitle">Add Vehicle</h2>
+    <form id="vehicleForm">
+      <label>Nickname
+        <input type="text" id="vName" placeholder="e.g. Dad's Truck" required>
+      </label>
+      <label>Make
+        <input type="text" id="vMake" placeholder="e.g. Honda">
+      </label>
+      <label>Model
+        <input type="text" id="vModel" placeholder="e.g. Civic">
+      </label>
+      <label>Year
+        <input type="number" id="vYear" placeholder="e.g. 2018">
+      </label>
+      <label>Current odometer
+        <input type="number" id="vOdo" placeholder="e.g. 52000">
+      </label>
+      <div class="btn-row">
+        <button type="submit" class="btn btn-primary">Save Vehicle</button>
+        <button type="button" id="vehicleModalCancel" class="btn">Cancel</button>
+        <button type="button" id="vehicleModalDelete" class="btn btn-danger" hidden>Delete Vehicle</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
