@@ -3,7 +3,7 @@
 // caches the Tesseract.js OCR engine (CDN) the first time it's used so
 // scanning still works without a network connection afterward.
 
-const CACHE_VERSION = 'garage-v1';
+const CACHE_VERSION = 'garage-v2';
 
 const APP_SHELL = [
   '.',
@@ -47,9 +47,26 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Cache-first for everything else: app shell files and third-party OCR
-  // assets (Tesseract.js core/worker/wasm/trained-data from the CDN) get
-  // cached the first time they're fetched, so OCR keeps working offline.
+  // Network-first for our own app shell (HTML/CSS/JS/manifest): when online,
+  // this always picks up a fresh deploy immediately instead of waiting on a
+  // cache-version bump. Falls back to the cached copy when offline.
+  const isOwnShell = url.origin === location.origin && APP_SHELL.some(shellUrl => shellUrl === req.url || shellUrl === url.href.split('?')[0]);
+  if (isOwnShell || req.mode === 'navigate') {
+    event.respondWith(
+      fetch(req).then(res => {
+        if (res && res.status === 200) {
+          const copy = res.clone();
+          caches.open(CACHE_VERSION).then(cache => cache.put(req, copy));
+        }
+        return res;
+      }).catch(() => caches.match(req))
+    );
+    return;
+  }
+
+  // Cache-first for everything else: icons and third-party OCR assets
+  // (Tesseract.js core/worker/wasm/trained-data from the CDN) rarely change
+  // and get cached the first time they're fetched, so OCR keeps working offline.
   event.respondWith(
     caches.match(req).then(cached => {
       if (cached) return cached;
