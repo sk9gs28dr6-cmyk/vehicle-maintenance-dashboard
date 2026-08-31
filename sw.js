@@ -3,7 +3,7 @@
 // caches the Tesseract.js OCR engine (CDN) the first time it's used so
 // scanning still works without a network connection afterward.
 
-const CACHE_VERSION = 'garage-v2';
+const CACHE_VERSION = 'garage-v3';
 
 const APP_SHELL = [
   '.',

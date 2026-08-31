@@ -22,6 +22,10 @@
   --warn-tint: #fbf2df;
   --ok-dot: #c3c9ce;
 
+  /* brand mark tile + glyph */
+  --brand-tile: #0f7a6b;
+  --brand-glyph: #ffffff;
+
   --shadow-card: 0 1px 2px rgba(16,25,32,0.06), 0 6px 18px rgba(16,25,32,0.035);
   --shadow-flat: 0 1px 2px rgba(16,25,32,0.05);
   --radius-lg: 18px;
@@ -51,6 +55,10 @@
     --warn: #dba53e;
     --warn-tint: #392f16;
     --ok-dot: #4a5155;
+
+    /* reversed mark: brighter teal tile, ink glyph (design handoff) */
+    --brand-tile: #14a08c;
+    --brand-glyph: #16191c;
 
     --shadow-card: 0 1px 2px rgba(0,0,0,0.3), 0 6px 18px rgba(0,0,0,0.25);
     --shadow-flat: 0 1px 2px rgba(0,0,0,0.3);
@@ -101,7 +109,14 @@ input { outline: none; }
 .screen-title { font: 700 26px/1.15 'DM Sans', sans-serif; letter-spacing: -.025em; }
 .screen-sub { font: 400 13px 'DM Sans', sans-serif; color: var(--text-dim); margin-top: 3px; }
 .top-row { display: flex; justify-content: space-between; align-items: center; }
-.avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--border); display: flex; align-items: center; justify-content: center; font: 600 13px 'DM Sans'; color: var(--text-dim); flex: none; }
+/* brand mark — 36px tile, 11px radius, 23px glyph (design handoff: mark 2a).
+   Deliberately non-interactive: no shadow or hover, or it reads as a menu button. */
+.brand-mark {
+  width: 36px; height: 36px; border-radius: 11px;
+  background: var(--brand-tile); color: var(--brand-glyph);
+  display: flex; align-items: center; justify-content: center; flex: none;
+}
+.brand-mark svg { display: block; }
 
 /* ---------- cards ---------- */
 .card { background: var(--card); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }
