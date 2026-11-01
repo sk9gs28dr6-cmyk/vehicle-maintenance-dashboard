@@ -3,413 +3,222 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Garage — Vehicle Maintenance</title>
-<link rel="stylesheet" href="style.css">
+<title>Garage — moved</title>
 
-<!-- PWA -->
-<link rel="manifest" href="manifest.json">
+<!-- Retired. The app now runs as a Google Apps Script web app bound to a
+     private Google Sheet, so this public page is just a signpost.
+     The manifest link is deliberately gone: nothing here should be
+     installable any more. -->
 <meta name="theme-color" content="#0f7a6b">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Garage">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="icon" href="icons/icon-192.png">
+
+<style>
+  :root {
+    --bg: #f4f6f7;
+    --card: #ffffff;
+    --text: #15191c;
+    --text-dim: #5c646d;
+    --accent: #0f7a6b;
+    --line: #e3e7e9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14181a;
+      --card: #1c2124;
+      --text: #eef1f2;
+      --text-dim: #9aa4ab;
+      --accent: #37b39f;
+      --line: #2b3134;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    display: flex;
+    justify-content: center;
+    padding: 40px 16px calc(40px + env(safe-area-inset-bottom));
+  }
+  .wrap { width: 100%; max-width: 420px; }
+  .mark {
+    width: 52px; height: 52px;
+    display: grid; place-items: center;
+    border-radius: 15px;
+    background: var(--accent);
+    color: #fff;
+    margin-bottom: 22px;
+  }
+  h1 { font-size: 25px; line-height: 1.25; letter-spacing: -0.4px; margin: 0 0 10px; }
+  p { margin: 0 0 14px; color: var(--text-dim); }
+  p.lead { color: var(--text); }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px;
+    margin: 24px 0 0;
+  }
+  .card h2 {
+    font-size: 11px;
+    letter-spacing: 0.9px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0 0 10px;
+    font-weight: 600;
+  }
+  .btn {
+    display: block;
+    width: 100%;
+    padding: 14px 18px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #fff;
+    font: inherit;
+    font-weight: 600;
+    text-align: center;
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .btn.secondary {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+  }
+  .btn + .btn { margin-top: 10px; }
+  .note { font-size: 13.5px; margin: 10px 0 0; }
+  ol { margin: 0; padding-left: 20px; color: var(--text-dim); }
+  ol li { margin-bottom: 7px; }
+  [hidden] { display: none !important; }
+  .ok { color: var(--accent); font-weight: 600; }
+</style>
 </head>
 <body>
-<div class="frame">
+<div class="wrap">
 
-  <div class="screens">
-
-    <!-- GARAGE (vehicle list / home) -->
-    <section class="screen" id="screen-garage">
-      <div class="px top-row">
-        <div>
-          <div class="screen-title">Garage</div>
-          <div class="screen-sub" id="garageSub">0 vehicles · 0 records</div>
-        </div>
-        <!-- Brand mark: not interactive (no shadow / hover / click) per design handoff -->
-        <div class="brand-mark" role="img" aria-label="Garage">
-          <svg width="23" height="23" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
-            <path d="M5.5 18.5 L20 7.5 L34.5 18.5" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-            <rect x="11" y="22.5" width="18" height="3.4" rx="1.7" fill="currentColor"/>
-            <rect x="11" y="28.2" width="18" height="3.4" rx="1.7" fill="currentColor"/>
-            <rect x="11" y="33.9" width="18" height="3.4" rx="1.7" fill="currentColor" opacity="0.42"/>
-          </svg>
-        </div>
-      </div>
-      <div id="garageCards" style="display:flex;flex-direction:column;gap:12px;margin-top:18px"></div>
-      <div class="add-vehicle-tile" id="addVehicleFromGarage">+ Add a vehicle</div>
-      <p class="empty-msg" id="garageEmpty" hidden>No vehicles yet — add one to start tracking.</p>
-    </section>
-
-    <!-- DASHBOARD (per active vehicle) -->
-    <section class="screen" id="screen-dashboard">
-      <div class="px" style="display:flex;justify-content:space-between;align-items:center">
-        <button class="link-sm" id="dashToGarage">‹ Garage</button>
-        <button class="link-muted" id="dashEdit">Edit</button>
-      </div>
-      <div class="px" style="padding-top:8px">
-        <div class="screen-title" id="dashVehName" style="font-size:25px">Vehicle</div>
-        <div class="screen-sub" id="dashVehSub"></div>
-      </div>
-      <div class="chip-row" id="dashChips"></div>
-
-      <div class="card odo-card">
-        <div id="odoView">
-          <div class="top-row" style="align-items:flex-start">
-            <div>
-              <div class="odo-label">Odometer</div>
-              <div class="odo-value-row">
-                <div class="odo-value" id="odoValue">0</div>
-                <div class="odo-unit">mi</div>
-              </div>
-              <div class="odo-updated" id="odoUpdated">Updated —</div>
-            </div>
-            <button class="btn-fill" id="openOdo">Update</button>
-          </div>
-        </div>
-        <div id="odoEditBox" hidden>
-          <div class="odo-label">New odometer reading</div>
-          <div style="display:flex;gap:9px;margin-top:9px;align-items:center">
-            <input class="odo-input" id="odoDraftInput" inputmode="numeric" placeholder="0">
-            <button class="btn-fill" id="saveOdo">Save</button>
-          </div>
-          <div class="odo-actions-row">
-            <button class="link-sm" id="scanOdoBtn">Scan odometer photo</button>
-            <button class="link-muted" id="cancelOdo">Cancel</button>
-          </div>
-          <input type="file" id="odoScanInput" accept="image/*" capture="environment" hidden>
-        </div>
-      </div>
-
-      <div class="stat-row">
-        <div class="stat-tile card-flat" id="statOverdue"><div class="stat-num" id="statOverdueNum" style="color:var(--danger)">0</div><div class="stat-label">Overdue</div></div>
-        <div class="stat-tile card-flat" id="statSoon"><div class="stat-num" id="statSoonNum" style="color:var(--warn)">0</div><div class="stat-label">Due soon</div></div>
-        <div class="stat-tile wide card-flat" id="statCost" hidden><div class="stat-num" id="statCostNum">$0</div><div class="stat-label">Last 12 mo</div></div>
-      </div>
-
-      <div class="section-row">
-        <div class="section-head">Upcoming service</div>
-        <button class="link-sm" id="dashSeeAll">See all</button>
-      </div>
-      <div class="svc-list" id="dashTopServices"></div>
-      <p class="empty-msg" id="dashEmpty" hidden>No services logged yet for this vehicle.</p>
-
-      <div class="card cost-card" id="costCard" hidden>
-        <div class="cost-title">Cost of ownership</div>
-        <div class="cost-grid split">
-          <div><div class="cost-num" id="costPerMile">$0.00</div><div class="cost-label" id="costPerMileLabel">Per mi</div></div>
-          <div><div class="cost-num" id="costTotal2">$0</div><div class="cost-label">Total logged</div></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- DUE -->
-    <section class="screen" id="screen-due">
-      <div class="px">
-        <div class="screen-title">Due</div>
-        <div class="screen-sub" id="dueSub"></div>
-      </div>
-      <div class="chip-row" id="dueChips"></div>
-      <div class="px" id="dueGroups" style="padding-top:8px"></div>
-      <p class="empty-msg" id="dueEmpty" hidden>Nothing logged yet — add a vehicle's first service to start tracking.</p>
-
-      <div class="banner">
-        <div class="banner-icon">◷</div>
-        <div style="flex:1">
-          <div class="banner-title" id="reminderLine">Reminders are off</div>
-          <div class="banner-sub">Intervals are shared across all vehicles</div>
-        </div>
-        <button class="link-sm" id="dueEdit">Edit</button>
-      </div>
-    </section>
-
-    <!-- RECORDS -->
-    <section class="screen" id="screen-records">
-      <div class="px">
-        <div class="screen-title">Records</div>
-        <div class="screen-sub" id="recordsSub"></div>
-      </div>
-      <div class="chip-row" id="recordsChips"></div>
-
-      <div class="card cost-card" id="recCostCard" style="margin-top:12px" hidden>
-        <div class="cost-grid">
-          <div><div class="cost-num" id="recCostTotal">$0</div><div class="cost-label">Total logged</div></div>
-          <div style="width:1px;background:var(--rule)"></div>
-          <div><div class="cost-num" id="recCostYear">$0</div><div class="cost-label">Last 12 months</div></div>
-          <div style="width:1px;background:var(--rule)"></div>
-          <div><div class="cost-num" id="recCostPerMile">$0.00</div><div class="cost-label" id="recCostPerMileLabel">Per mi</div></div>
-        </div>
-      </div>
-
-      <div class="px" id="recordYears" style="padding-top:6px"></div>
-      <p class="empty-msg" id="recordsEmpty" hidden>No records yet for this vehicle.</p>
-
-      <div class="two-col">
-        <button class="outline-btn" id="shareBackupBtn" hidden>📤 Share</button>
-        <button class="outline-btn" id="exportBtn">Export backup</button>
-        <label class="outline-btn file-btn" style="cursor:pointer">Import backup
-          <input type="file" id="importInput" accept="application/json" hidden>
-        </label>
-      </div>
-    </section>
-
-    <!-- SETTINGS -->
-    <section class="screen" id="screen-settings">
-      <div class="px"><div class="screen-title">Settings</div></div>
-
-      <div class="px" style="padding-top:18px">
-        <div class="eyebrow" style="padding-bottom:8px">Reminders</div>
-        <div class="card-flat settings-card">
-          <div class="set-row" id="rowPush">
-            <div style="flex:1"><div class="set-title">Push notifications</div><div class="set-sub">Local alert when you open the app with items due</div></div>
-            <div class="switch" id="pushSwitch"><span class="switch-knob"></span></div>
-          </div>
-          <div class="set-row" id="rowEmail">
-            <div style="flex:1"><div class="set-title">Email reminders</div><div class="set-sub" id="emailSub">Off</div></div>
-            <div class="switch" id="emailSwitch"><span class="switch-knob"></span></div>
-          </div>
-        </div>
-        <div class="card-flat" id="emailDetail" style="margin-top:10px;padding:14px 16px" hidden>
-          <div class="form-field" style="padding-top:0">
-            <label>Send weekly reminders to</label>
-            <input type="email" id="sEmailTo" placeholder="you@example.com">
-          </div>
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <button class="outline-btn" id="saveEmailSettings" style="flex:1">Save</button>
-            <button class="outline-btn" id="sendTestEmailBtn" style="flex:1">Send test</button>
-          </div>
-          <p class="onb-body-sm" id="emailStatusHint" style="margin-top:8px"></p>
-          <p class="onb-body-sm" id="testEmailResult"></p>
-        </div>
-      </div>
-
-      <div class="px" style="padding-top:20px">
-        <div class="top-row" style="padding-bottom:8px">
-          <div class="eyebrow">Service intervals</div>
-          <div style="font:400 11.5px 'DM Sans';color:var(--text-faint)">Shared</div>
-        </div>
-        <div class="card-flat settings-card" id="intervalsList"></div>
-      </div>
-
-      <div class="px" style="padding-top:20px">
-        <div class="eyebrow" style="padding-bottom:8px">Vehicles</div>
-        <div class="card-flat settings-card" id="settingsVehicleList"></div>
-      </div>
-
-      <div class="px" style="padding-top:20px">
-        <button class="outline-btn" id="replayOnboardingBtn" style="width:100%">Replay first-run setup</button>
-        <button class="danger-link" id="clearAllBtn">Clear all data</button>
-      </div>
-    </section>
-
+  <div class="mark" role="img" aria-label="Garage">
+    <svg width="30" height="30" viewBox="0 0 40 40" aria-hidden="true" focusable="false">
+      <path d="M5.5 18.5 L20 7.5 L34.5 18.5" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="11" y="22.5" width="18" height="3.4" rx="1.7" fill="currentColor"/>
+      <rect x="11" y="28.2" width="18" height="3.4" rx="1.7" fill="currentColor"/>
+      <rect x="11" y="33.9" width="18" height="3.4" rx="1.7" fill="currentColor" opacity="0.42"/>
+    </svg>
   </div>
 
-  <!-- bottom tab bar -->
-  <nav class="tabbar">
-    <button class="tab-item" data-tab="garage"><span class="tab-glyph">▤</span>Garage</button>
-    <button class="tab-item" data-tab="due"><span class="tab-glyph">◷</span>Due<span class="tab-badge" id="tabDueBadge" hidden>0</span></button>
-    <button class="tab-fab" id="fabLog">+</button>
-    <button class="tab-item" data-tab="records"><span class="tab-glyph">≡</span>Records</button>
-    <button class="tab-item" data-tab="settings"><span class="tab-glyph">⚙</span>Settings</button>
-  </nav>
+  <h1>Garage has moved</h1>
+  <p class="lead">This version has been retired. Garage now runs on a private
+    Google Sheet, so your service history syncs across every device and the
+    maintenance reminders send themselves from Google's servers.</p>
+  <p>Nothing was lost — all vehicles, service records, and intervals were
+    carried over.</p>
 
-  <!-- SERVICE DETAIL SHEET -->
-  <div class="scrim" id="scrimService" hidden></div>
-  <div class="sheet" id="sheetService" hidden>
-    <div class="sheet-grabber"></div>
-    <div style="display:flex;gap:12px;align-items:center">
-      <div class="svc-tile" id="svcTile" style="width:42px;height:42px;font-size:19px"></div>
-      <div style="flex:1">
-        <div class="sheet-title" id="svcName"></div>
-        <div class="sheet-detail" id="svcDetail"></div>
-      </div>
-    </div>
-    <div class="stat-strip">
-      <div><div class="k">Interval</div><div class="v" id="svcEvery"></div></div>
-      <div class="strip-rule"></div>
-      <div><div class="k">Last done</div><div class="v" id="svcLast"></div></div>
-      <div class="strip-rule"></div>
-      <div><div class="k">Next at</div><div class="v" id="svcNextAt"></div></div>
-    </div>
-    <div class="onb-body-sm" id="svcHistory" style="margin-top:14px"></div>
-    <button class="btn-fill save-btn" id="logThisServiceBtn">Log this service</button>
-    <button class="link-muted" id="closeServiceSheet" style="width:100%;text-align:center;padding-top:14px">Close</button>
+  <div class="card" id="linkCard" hidden>
+    <h2>New address</h2>
+    <a class="btn" id="newAppLink" href="#">Open Garage</a>
+    <p class="note">Signed in to the right Google account? Then it just opens.</p>
   </div>
 
-  <!-- RECORD DETAIL SHEET -->
-  <div class="scrim" id="scrimRecord" hidden></div>
-  <div class="sheet" id="sheetRecord" hidden>
-    <div class="sheet-grabber"></div>
-    <div class="top-row" style="align-items:flex-start">
-      <div>
-        <div class="sheet-title" id="recTitle"></div>
-        <div class="sheet-detail" id="recMeta"></div>
-      </div>
-      <div style="font:700 20px 'DM Sans';font-variant-numeric:tabular-nums" id="recCost"></div>
-    </div>
-    <div class="receipt-slot"><div class="receipt-slot-label" id="recSlot"></div></div>
-    <div style="display:flex;margin-top:16px;gap:14px">
-      <div style="flex:1"><div class="k" style="font:400 11.5px 'DM Sans';color:var(--text-dim)">Shop</div><div class="v" style="font:600 14px 'DM Sans';margin-top:4px" id="recShop"></div></div>
-      <div style="flex:none;text-align:right"><div class="k" style="font:400 11.5px 'DM Sans';color:var(--text-dim)">Odometer</div><div class="v" style="font:600 14px 'DM Sans';margin-top:4px" id="recMileage"></div></div>
-    </div>
-    <button class="outline-btn" id="closeRecordSheet" style="width:100%;margin-top:20px;min-height:48px">Done</button>
+  <div class="card" id="noLinkCard">
+    <h2>Getting back in</h2>
+    <ol>
+      <li>Open the Garage web app URL from your Google account.</li>
+      <li><strong>Share → Add to Home Screen</strong> to replace this icon.</li>
+      <li>Delete this old icon.</li>
+    </ol>
   </div>
 
-  <!-- VEHICLE FORM SHEET (add / edit) -->
-  <div class="scrim" id="scrimVehicle" hidden></div>
-  <div class="sheet" id="sheetVehicle" hidden>
-    <div class="sheet-grabber"></div>
-    <div class="sheet-title" id="vehicleFormTitle">Add vehicle</div>
-    <form id="vehicleForm">
-      <div class="form-list tinted" style="margin-top:16px">
-        <div class="form-field"><label>Nickname</label><input id="vName" placeholder="Dad's Truck" required></div>
-        <div class="form-field"><label>Make</label><input id="vMake" placeholder="Toyota"></div>
-        <div class="form-field"><label>Model</label><input id="vModel" placeholder="Tacoma"></div>
-        <div class="form-field"><label>Year</label><input id="vYear" inputmode="numeric" placeholder="2014"></div>
-        <div class="form-field"><label>Current odometer (mi)</label><input id="vOdo" inputmode="numeric" placeholder="84,210"></div>
-      </div>
-      <button type="submit" class="btn-fill save-btn">Save vehicle</button>
-    </form>
-    <div style="display:flex;justify-content:space-between;margin-top:10px">
-      <button class="link-muted" id="vehicleModalCancel">Cancel</button>
-      <button class="link-sm" id="vehicleModalDelete" style="color:var(--danger)" hidden>Delete vehicle</button>
-    </div>
-  </div>
-
-  <!-- INTERVAL EDIT SHEET -->
-  <div class="scrim" id="scrimInterval" hidden></div>
-  <div class="sheet" id="sheetInterval" hidden>
-    <div class="sheet-grabber"></div>
-    <div class="sheet-title" id="intervalFormTitle">Interval</div>
-    <div class="form-list tinted" style="margin-top:16px">
-      <div class="form-field"><label>Every (miles) — blank to ignore</label><input id="iMiles" inputmode="numeric"></div>
-      <div class="form-field"><label>Every (months) — blank to ignore</label><input id="iMonths" inputmode="numeric"></div>
-    </div>
-    <button class="btn-fill save-btn" id="saveIntervalBtn">Save</button>
-    <button class="link-muted" id="closeIntervalSheet" style="width:100%;text-align:center;padding-top:14px">Cancel</button>
-  </div>
-
-  <!-- LOG SERVICE FLOW (full screen, 4 steps) -->
-  <div class="full-sheet" id="sheetLog" hidden>
-    <div class="full-sheet-head">
-      <button class="link-sm" id="logBack" hidden>‹ Back</button>
-      <div class="step-label" id="logStepLabel"></div>
-      <button class="link-muted" id="logCancel">Cancel</button>
-    </div>
-    <div class="full-sheet-body">
-
-      <div id="logStepCapture">
-        <div class="screen-title" style="font-size:24px">Log a service</div>
-        <div class="onb-body" style="margin-top:6px;font-size:13.5px">Photograph the invoice and the details get filled in for you. You can correct anything before saving.</div>
-        <label class="scan-dropzone">
-          <input type="file" id="logFileInput" accept="image/*" capture="environment" hidden>
-          <div class="scan-icon">◎</div>
-          <div class="scan-cta">Scan invoice photo</div>
-          <div class="scan-hint">camera or photo library</div>
-        </label>
-        <div class="cropper-stage" id="cropperStage" hidden>
-          <img id="cropperImg">
-          <div id="cropRect" class="crop-rect" hidden></div>
-        </div>
-        <div id="cropperActions" hidden style="display:flex;gap:8px;margin-top:10px">
-          <button type="button" class="outline-btn" id="scanCroppedBtn" style="flex:1" disabled>Scan cropped area</button>
-          <button type="button" class="outline-btn" id="scanFullBtn" style="flex:1">Scan full image</button>
-        </div>
-        <button class="manual-link" id="skipScanBtn">Enter details manually</button>
-      </div>
-
-      <div id="logStepScanning" hidden>
-        <div class="screen-title" style="font-size:24px">Reading invoice</div>
-        <div class="onb-body" style="margin-top:6px;font-size:13.5px" id="scanStatus">Finding the text…</div>
-        <div class="progress-track"><div class="progress-fill" id="scanProgressFill"></div></div>
-        <div class="card scan-fields" id="scanFoundFields"></div>
-      </div>
-
-      <div id="logStepConfirm" hidden>
-        <div class="screen-title" style="font-size:24px">Confirm details</div>
-        <div class="onb-body" style="margin-top:6px;font-size:13.5px" id="confirmSub"></div>
-        <div class="form-list" style="margin-top:18px">
-          <div class="form-field"><label>Service date</label><input type="date" id="fServiceDate" required></div>
-          <div class="form-field"><label id="mileageLabel">Odometer at service (mi)</label><input id="fMileage" inputmode="numeric" placeholder="0" required></div>
-          <div class="form-field"><label>Cost</label><input id="fCost" inputmode="decimal" placeholder="0.00"></div>
-          <div class="form-field"><label>Shop or notes</label><input id="fNotes" placeholder="Where the work was done"></div>
-        </div>
-        <div class="eyebrow" style="padding:20px 0 10px">What was done</div>
-        <div class="type-chip-row" id="serviceChips"></div>
-        <button class="raw-toggle" id="toggleRawBtn" hidden>Show raw scan text</button>
-        <div class="raw-box" id="rawBox" hidden></div>
-        <textarea id="fRawText" hidden></textarea>
-        <button class="save-btn btn-fill" id="saveRecordBtn">Save record</button>
-        <div class="save-hint" id="saveHint">Pick at least one service and an odometer reading.</div>
-      </div>
-
-      <div id="logStepDone" hidden style="padding-top:14px">
-        <div class="done-badge">✓</div>
-        <div class="done-title">Record saved</div>
-        <div class="done-sub" id="doneSub"></div>
-        <div class="card done-list" id="doneList"></div>
-        <button class="btn-fill save-btn" id="doneCtaBtn">Back to garage</button>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ONBOARDING (full screen, 3 steps) -->
-  <div class="full-sheet-onboard" id="sheetOnboard" hidden>
-    <div class="full-sheet-head">
-      <button class="link-sm" id="onbBack" hidden>‹ Back</button>
-      <div class="onb-dots" id="onbDots"></div>
-      <button class="link-muted" id="onbSkip">Skip</button>
-    </div>
-    <div class="full-sheet-body">
-
-      <div id="onbStep1">
-        <div class="onb-title">Every service, in one place</div>
-        <div class="onb-body">Garage keeps the family's vehicles, their intervals and their receipts together, and tells you what is due before it becomes a repair.</div>
-        <div class="onb-points">
-          <div class="onb-point"><div class="onb-point-icon">◷</div><div><div class="onb-point-title">Due before it is late</div><div class="onb-point-body">Every interval is tracked by both mileage and months, whichever comes first.</div></div></div>
-          <div class="onb-point"><div class="onb-point-icon">◎</div><div><div class="onb-point-title">Photograph the invoice</div><div class="onb-point-body">The date, odometer, total and shop are read off the receipt for you.</div></div></div>
-          <div class="onb-point"><div class="onb-point-icon">≡</div><div><div class="onb-point-title">One history per vehicle</div><div class="onb-point-body">Records and receipts stay with the vehicle, ready for resale or a warranty claim.</div></div></div>
-        </div>
-      </div>
-
-      <div id="onbStep2" hidden>
-        <div class="onb-title-sm">Add your first vehicle</div>
-        <div class="onb-body-sm">You can add the rest later.</div>
-        <div class="form-list tinted" style="margin-top:18px">
-          <div class="form-field"><label>Nickname</label><input id="nvName" placeholder="Dad's Truck"></div>
-          <div class="form-field"><label>Year, make and model</label><input id="nvSub" placeholder="2014 Toyota Tacoma"></div>
-          <div class="form-field"><label>Current odometer (mi)</label><input id="nvOdo" inputmode="numeric" placeholder="84,210"></div>
-        </div>
-      </div>
-
-      <div id="onbStep3" hidden>
-        <div class="onb-title-sm">When should we tell you?</div>
-        <div class="onb-body-sm">Garage uses common manufacturer intervals to start. Adjust any of them later in Settings.</div>
-        <div class="form-list tinted" style="margin-top:18px;padding:0;overflow:hidden">
-          <div class="set-row" id="onbRowPush" style="border-top:none">
-            <div style="flex:1"><div class="set-title">Push notification</div><div class="set-sub">A local alert when items are due</div></div>
-            <div class="switch" id="onbPushSwitch"><span class="switch-knob"></span></div>
-          </div>
-          <div class="set-row" id="onbRowEmail">
-            <div style="flex:1"><div class="set-title">Weekly email summary</div><div class="set-sub" id="onbEmailSub">Off</div></div>
-            <div class="switch" id="onbEmailSwitch"><span class="switch-knob"></span></div>
-          </div>
-        </div>
-        <div class="onb-tip">Already tracking in a spreadsheet? Import a JSON backup from Records and your history comes with you.</div>
-      </div>
-
-    </div>
-    <div class="onb-footer">
-      <button class="btn-fill save-btn" id="onboardNextBtn" style="margin-top:0">Get started</button>
-    </div>
+  <div class="card" id="rescueCard" hidden>
+    <h2>Data still on this device</h2>
+    <p class="note" style="margin:0 0 14px">This browser is still holding a
+      copy of the old offline data. It has already been migrated, but you can
+      download it as a backup before clearing this icon out.</p>
+    <button class="btn secondary" id="rescueBtn" type="button">Download old data (JSON)</button>
+    <p class="note" id="rescueDone" hidden><span class="ok">Saved.</span> Check your Downloads.</p>
   </div>
 
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="app.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // ── Where the app lives now ───────────────────────────────────────────────
+  // Paste the Apps Script web app URL (ends in /exec) between the quotes to
+  // turn on the "Open Garage" button. Left empty on purpose: this page is
+  // public, and an empty string keeps the address off the open web. The URL
+  // is not a credential — the deployment is set to "Only myself", so anyone
+  // else following it just gets a Google permission error — but there's no
+  // reason to publish it either.
+  var NEW_APP_URL = '';
+
+  if (NEW_APP_URL) {
+    var link = document.getElementById('newAppLink');
+    link.href = NEW_APP_URL;
+    link.rel = 'noopener';
+    document.getElementById('linkCard').hidden = false;
+    document.getElementById('noLinkCard').hidden = true;
+  }
+
+  // ── Stop being an installed app ───────────────────────────────────────────
+  // Unregister the service worker and drop its caches so the home-screen
+  // icon degrades to a plain Safari shortcut and no stale app shell can be
+  // served from cache. localStorage is deliberately left alone — that's the
+  // user's data, and the rescue button below still needs it.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations()
+      .then(function (regs) { regs.forEach(function (r) { r.unregister(); }); })
+      .catch(function () { /* nothing we can do, and nothing breaks */ });
+  }
+  if (window.caches && caches.keys) {
+    caches.keys()
+      .then(function (keys) { keys.forEach(function (k) { caches.delete(k); }); })
+      .catch(function () {});
+  }
+
+  // ── Last-chance export of the old offline data ────────────────────────────
+  // Same origin as the retired app, so its localStorage is still readable
+  // here. Shown only when there is actually something to download.
+  var KEYS = ['vmd_state_v2', 'vmd_records', 'vmd_intervals', 'vmd_currentOdo', 'vmd_vehicleName'];
+
+  function collect() {
+    var out = {};
+    var found = false;
+    KEYS.forEach(function (k) {
+      var raw;
+      try { raw = localStorage.getItem(k); } catch (e) { return; }
+      if (raw === null) return;
+      found = true;
+      try { out[k] = JSON.parse(raw); } catch (e) { out[k] = raw; }
+    });
+    return found ? out : null;
+  }
+
+  var legacy = collect();
+  if (legacy) {
+    document.getElementById('rescueCard').hidden = false;
+    document.getElementById('rescueBtn').addEventListener('click', function () {
+      var payload = {
+        exportedAt: new Date().toISOString(),
+        source: 'garage-pwa-retired',
+        data: legacy
+      };
+      var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'garage-old-device-backup.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      document.getElementById('rescueDone').hidden = false;
+    });
+  }
+})();
+</script>
 </body>
 </html>

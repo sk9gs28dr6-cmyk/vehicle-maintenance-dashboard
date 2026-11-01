@@ -1,82 +1,30 @@
-// Garage — service worker
-// Caches the app shell for offline/installable use, and opportunistically
-// caches the Tesseract.js OCR engine (CDN) the first time it's used so
-// scanning still works without a network connection afterward.
+// Garage — self-destructing service worker.
+//
+// The app has moved to a Google Apps Script web app, so this one exists only
+// to get itself out of the way. Browsers re-fetch sw.js in the background and
+// byte-compare it against the installed copy; because this file differs from
+// the old caching worker, that check installs this one, which immediately
+// unregisters itself and deletes every cache it left behind.
+//
+// index.html unregisters the worker too. Either path is enough — keeping both
+// covers clients that check for a worker update before they next navigate.
+//
+// Note it does NOT touch localStorage: the old offline data stays readable so
+// index.html can still offer it as a download.
 
-const CACHE_VERSION = 'garage-v3';
-
-const APP_SHELL = [
-  '.',
-  'index.html',
-  'style.css',
-  'app.js',
-  'manifest.json',
-  'icons/icon-192.png',
-  'icons/icon-512.png',
-  'icons/icon-180.png',
-].map(p => new URL(p, self.registration.scope).href);
-
-self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_VERSION)
-      .then(cache => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting())
-  );
-});
+self.addEventListener('install', () => self.skipWaiting());
 
 self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE_VERSION).map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.map(k => caches.delete(k)));
+    await self.registration.unregister();
+
+    // Reload any open window so it drops this worker and fetches the live
+    // page instead of whatever the old shell had cached.
+    const clients = await self.clients.matchAll({ type: 'window' });
+    clients.forEach(client => client.navigate(client.url));
+  })());
 });
 
-self.addEventListener('fetch', event => {
-  const req = event.request;
-  if (req.method !== 'GET') return;
-
-  const url = new URL(req.url);
-
-  // Never cache our own local-server sync API — always hit the network so
-  // the dashboard reflects the latest data (falls back to {} if offline).
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(
-      fetch(req).catch(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
-    );
-    return;
-  }
-
-  // Network-first for our own app shell (HTML/CSS/JS/manifest): when online,
-  // this always picks up a fresh deploy immediately instead of waiting on a
-  // cache-version bump. Falls back to the cached copy when offline.
-  const isOwnShell = url.origin === location.origin && APP_SHELL.some(shellUrl => shellUrl === req.url || shellUrl === url.href.split('?')[0]);
-  if (isOwnShell || req.mode === 'navigate') {
-    event.respondWith(
-      fetch(req).then(res => {
-        if (res && res.status === 200) {
-          const copy = res.clone();
-          caches.open(CACHE_VERSION).then(cache => cache.put(req, copy));
-        }
-        return res;
-      }).catch(() => caches.match(req))
-    );
-    return;
-  }
-
-  // Cache-first for everything else: icons and third-party OCR assets
-  // (Tesseract.js core/worker/wasm/trained-data from the CDN) rarely change
-  // and get cached the first time they're fetched, so OCR keeps working offline.
-  event.respondWith(
-    caches.match(req).then(cached => {
-      if (cached) return cached;
-      return fetch(req).then(res => {
-        if (res && res.status === 200) {
-          const copy = res.clone();
-          caches.open(CACHE_VERSION).then(cache => cache.put(req, copy));
-        }
-        return res;
-      }).catch(() => cached);
-    })
-  );
-});
+// No fetch handler on purpose: every request goes straight to the network.
