@@ -1,0 +1,1420 @@
+<script>
+(function () {
+'use strict';
+
+/* =====================================================================
+   1. Utilities
+   ===================================================================== */
+var ICONS = {
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.4 3.2-5.5 6.5-5.5s5.9 2.1 6.5 5.5"/><path d="M16 4.8a3.5 3.5 0 0 1 0 6.4M18.5 14.8c1.6.9 2.7 2.6 3 5.2"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  chev: '<path d="M9 6l6 6-6 6"/>',
+  back: '<path d="M15 6l-6 6 6 6"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  alert: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.5v.01"/>',
+  download: '<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  ruler: '<path d="M4 20V9.5L12 4l8 5.5V20z"/><path d="M9.5 20v-6h5v6"/>'
+};
+function icon(name) { return '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>'; }
+function $(sel, root) { return (root || document).querySelector(sel); }
+function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+function esc(s) {
+  return String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+function round2(n) { return Math.round(n * 100) / 100; }
+function sum(arr, f) { var t = 0; for (var i = 0; i < arr.length; i++) t += f(arr[i]); return round2(t); }
+function num(n, dec) {
+  return Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+function money(n) { n = Math.round(n || 0); return (n < 0 ? '−' : '') + '$' + num(n, 0); }
+function money2(n) { n = round2(n || 0); return (n < 0 ? '−' : '') + '$' + num(n, 2); }
+function moneyShort(n) {
+  if (n >= 1e6) return '$' + (n / 1e6).toFixed(n % 1e6 ? 1 : 0) + 'M';
+  if (n >= 1000) return '$' + Math.round(n / 1000) + 'k';
+  return '$' + Math.round(n);
+}
+function pct(x) { return Math.round((x || 0) * 100) + '%'; }
+function pct1(x) { return ((x || 0) * 100).toFixed(1) + '%'; }
+/** Variance in words: positive is under budget. */
+function varText(v) {
+  if (Math.abs(v) < 0.005) return '<span class="zero">—</span>';
+  return v < 0 ? '<span class="var-over">' + money(-v) + ' over</span>'
+    : '<span class="var-under">' + money(v) + ' under</span>';
+}
+function parseAmount(s) {
+  s = String(s === null || s === undefined ? '' : s).trim();
+  if (!s) return NaN;
+  var neg = /^\(.*\)$/.test(s) || /^[-−]/.test(s);
+  var n = Number(s.replace(/[^0-9.]/g, ''));
+  if (!/[0-9]/.test(s) || !isFinite(n)) return NaN;
+  return round2(neg ? -n : n);
+}
+var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function fmtDate(d) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || '');
+  return m ? MONTHS[+m[2] - 1] + ' ' + (+m[3]) + ', ' + m[1] : (d || '');
+}
+function isDate(d) { return /^\d{4}-\d{2}-\d{2}$/.test(d || '') && !isNaN(new Date(d + 'T00:00:00').getTime()); }
+function daysBetween(a, b) { return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 864e5); }
+function by(key) { return function (a, b) { return a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0; }; }
+
+/* =====================================================================
+   2. State, server calls, saving
+   ===================================================================== */
+var S = {
+  data: null,
+  rev: 0,
+  route: { view: 'overview' },
+  panel: null,
+  dialog: null,
+  ui: { hideEmpty: {}, collapsed: {}, ledger: { q: '', cat: '', vendor: '', from: '', to: '', sort: 'date', dir: -1 },
+    projType: '', showArchived: false, vendorQ: '', tplType: 'Residential', focusCat: null }
+};
+var TABLE_KEY = { Projects: 'projects', Templates: 'templates', LineItems: 'lineItems', Costs: 'costs',
+  ChangeOrders: 'changeOrders', Vendors: 'vendors' };
+
+function server(fn, args) {
+  return new Promise(function (resolve, reject) {
+    var r = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+    r[fn].apply(r, args || []);
+  });
+}
+function errText(e) { return (e && e.message ? e.message : String(e)).replace(/^Error:\s*/, ''); }
+
+function setData(json) {
+  S.data = JSON.parse(json);
+  S.rev++;
+}
+function reload() {
+  return server('apiLoad').then(function (json) { setData(json); render(); });
+}
+
+function applyLocal(ops) {
+  ops.forEach(function (op) {
+    var list = S.data[TABLE_KEY[op.tab]];
+    if (op.op === 'remove') {
+      for (var i = list.length - 1; i >= 0; i--) if (list[i].id === op.id) list.splice(i, 1);
+      return;
+    }
+    var found = null;
+    for (var j = 0; j < list.length; j++) if (list[j].id === op.obj.id) { found = j; break; }
+    if (op.tab === 'Costs' && op.obj.deleted) {
+      if (found !== null) list.splice(found, 1);
+    } else if (found !== null) {
+      for (var k in op.obj) list[found][k] = op.obj[k];
+    } else {
+      list.push(JSON.parse(JSON.stringify(op.obj)));
+    }
+  });
+  S.rev++;
+}
+
+var saveQueue = Promise.resolve();
+/** Applies changes on screen at once, then saves them. A failed save reloads the true state. */
+function mutate(ops, message, undoOps) {
+  applyLocal(ops);
+  render();
+  if (message) toast(message, undoOps ? function () { mutate(undoOps, 'Undone'); } : null);
+  saveQueue = saveQueue.then(function () { return server('apiOps', [ops]); }).then(null, function (e) {
+    toast('That change could not be saved: ' + errText(e));
+    return reload().then(null, function () {});
+  });
+  return saveQueue;
+}
+function up(tab, obj) { return { op: 'upsert', tab: tab, obj: obj }; }
+
+function toast(text, undo) {
+  var el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = '<span>' + esc(text) + '</span>' + (undo ? '<button type="button">Undo</button>' : '');
+  if (undo) el.querySelector('button').onclick = function () { el.remove(); undo(); };
+  $('#toasts').appendChild(el);
+  setTimeout(function () { el.remove(); }, undo ? 7000 : 3500);
+}
+
+/* ---------- lookups ---------- */
+function byId(list, id) { for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i]; return null; }
+function project(id) { return byId(S.data.projects, id); }
+function vendor(id) { return byId(S.data.vendors, id); }
+function vendorName(id) { var v = vendor(id); return v ? v.name : 'Unknown vendor'; }
+function lineItem(id) { return byId(S.data.lineItems, id); }
+function templateTypes() {
+  var t = { Residential: 0, Commercial: 0 };
+  S.data.templates.forEach(function (r) { if (r.active) t[r.type] = (t[r.type] || 0) + 1; });
+  return t;
+}
+function activeProjects() {
+  return S.data.projects.filter(function (p) { return !p.archived && p.status !== 'Closed'; });
+}
+
+/* =====================================================================
+   3. Calculations (spec section 3)
+   ===================================================================== */
+var cache = { rev: -1 };
+function index() {
+  if (cache.rev === S.rev) return cache;
+  cache = { rev: S.rev, costsByLine: {}, linesByProject: {}, cosByProject: {}, calc: {} };
+  S.data.costs.forEach(function (c) { (cache.costsByLine[c.lineItemId] = cache.costsByLine[c.lineItemId] || []).push(c); });
+  S.data.lineItems.forEach(function (l) { (cache.linesByProject[l.projectId] = cache.linesByProject[l.projectId] || []).push(l); });
+  S.data.changeOrders.forEach(function (o) { (cache.cosByProject[o.projectId] = cache.cosByProject[o.projectId] || []).push(o); });
+  return cache;
+}
+
+function calc(pid) {
+  var ix = index();
+  if (ix.calc[pid]) return ix.calc[pid];
+  var p = project(pid);
+  var today = S.data.today;
+  var cos = ix.cosByProject[pid] || [];
+  var coByLine = {};
+  var contractChanges = 0, pendingBudget = 0, pendingContract = 0;
+  cos.forEach(function (o) {
+    if (o.status === 'Approved') {
+      if (o.lineItemId) coByLine[o.lineItemId] = (coByLine[o.lineItemId] || 0) + o.budgetChange;
+      contractChanges += o.contractChange;
+    } else {
+      pendingBudget += o.budgetChange;
+      pendingContract += o.contractChange;
+    }
+  });
+  var all = (ix.linesByProject[pid] || []).filter(function (l) { return !l.hidden; }).sort(function (a, b) {
+    return a.categoryOrder - b.categoryOrder || a.lineOrder - b.lineOrder || (a.name < b.name ? -1 : 1);
+  });
+  var rows = all.map(function (li) {
+    var costs = (ix.costsByLine[li.id] || []).slice().sort(function (a, b) {
+      return a.date < b.date ? 1 : a.date > b.date ? -1 : (a.created < b.created ? 1 : -1);
+    });
+    var r = { li: li, costs: costs, n: costs.length };
+    r.ob = li.originalBudget;
+    r.co = round2(coByLine[li.id] || 0);
+    r.rb = round2(r.ob + r.co);
+    r.actual = sum(costs, function (c) { return c.amount; });
+    r.last = costs.length ? costs[0].date : '';
+    if (li.done) r.forecast = r.actual;
+    else r.forecast = Math.max(li.forecastOverride === '' ? r.rb : li.forecastOverride, r.actual);
+    r.remaining = round2(r.forecast - r.actual);
+    r.variance = round2(r.rb - r.forecast);
+    r.status = li.done ? 'done' : (r.actual > r.rb + 0.005 && r.rb > 0) ? 'over'
+      : (Math.abs(r.actual) > 0.005 && r.rb === 0) ? 'unbudgeted' : r.n ? 'progress' : 'none';
+    return r;
+  });
+  var costRows = rows.filter(function (r) { return !r.li.fee; });
+  var feeRows = rows.filter(function (r) { return r.li.fee; });
+  function totals(list) {
+    return {
+      ob: sum(list, function (r) { return r.ob; }), co: sum(list, function (r) { return r.co; }),
+      rb: sum(list, function (r) { return r.rb; }), actual: sum(list, function (r) { return r.actual; }),
+      forecast: sum(list, function (r) { return r.forecast; }),
+      remaining: sum(list, function (r) { return r.remaining; }),
+      variance: sum(list, function (r) { return r.variance; })
+    };
+  }
+  var cats = [], catMap = {};
+  costRows.forEach(function (r) {
+    var c = catMap[r.li.category];
+    if (!c) { c = catMap[r.li.category] = { name: r.li.category, lines: [] }; cats.push(c); }
+    c.lines.push(r);
+  });
+  cats.forEach(function (c) { c.t = totals(c.lines); });
+  var cost = totals(costRows), fee = totals(feeRows);
+  var prog = totals(costRows.filter(function (r) { return !r.li.excludeProgress; }));
+  var origTotal = round2(cost.ob + fee.ob);
+  var contractOrig = p.originalContract === '' ? origTotal : p.originalContract;
+  var contract = round2(contractOrig + contractChanges);
+  var profit = round2(contract - cost.forecast);
+
+  var flags = [];
+  costRows.concat(feeRows).forEach(function (r) {
+    var where = r.li.category;
+    if (r.status === 'over' || (r.li.done && r.actual > r.rb + 0.005 && r.rb > 0)) {
+      flags.push({ kind: 'over', lineId: r.li.id, name: r.li.name, what: where + ' · ' + money(r.actual) + ' against a ' + money(r.rb) + ' budget', amount: r.actual - r.rb, label: money(r.actual - r.rb) + ' over' });
+    } else if (r.status === 'unbudgeted' || (r.li.done && r.rb === 0 && r.actual > 0.005)) {
+      flags.push({ kind: 'unbudgeted', lineId: r.li.id, name: r.li.name, what: where + ' · no budget set', amount: r.actual, label: money(r.actual) + ' unbudgeted' });
+    } else if (r.status === 'progress' && !r.li.fee && r.last && daysBetween(r.last, today) > 60) {
+      flags.push({ kind: 'stale', lineId: r.li.id, name: r.li.name, what: where + ' · no costs since ' + fmtDate(r.last) + '. Finished?', amount: 0, label: 'Check' });
+    }
+  });
+  cats.forEach(function (c) {
+    var overLines = c.lines.filter(function (r) { return r.variance < -0.005; }).length;
+    if (c.t.forecast > c.t.rb + 0.005 && overLines > 1) {
+      flags.push({ kind: 'trend', cat: c.name, name: c.name, what: 'Category trending over across ' + overLines + ' lines', amount: c.t.forecast - c.t.rb - 0.001, label: money(c.t.forecast - c.t.rb) + ' over' });
+    }
+  });
+  flags.sort(function (a, b) { return b.amount - a.amount; });
+
+  var byRow = {};
+  rows.forEach(function (r) { byRow[r.li.id] = r; });
+  return (ix.calc[pid] = {
+    p: p, rows: rows, byRow: byRow, cats: cats, feeRows: feeRows, cost: cost, fee: fee,
+    pct: prog.forecast > 0 ? Math.min(prog.actual / prog.forecast, 1) : 0,
+    hasExcluded: costRows.some(function (r) { return r.li.excludeProgress && (r.rb || r.actual); }),
+    used: cost.rb > 0 ? cost.actual / cost.rb : 0,
+    totalBudget: round2(cost.rb + fee.rb), origTotal: origTotal,
+    contractOrig: contractOrig, contractChanges: round2(contractChanges), contract: contract,
+    pendingBudget: round2(pendingBudget), pendingContract: round2(pendingContract),
+    profit: profit, margin: contract > 0 ? profit / contract : null,
+    origMargin: contractOrig > 0 ? (contractOrig - cost.ob) / contractOrig : null,
+    flags: flags, cos: cos
+  });
+}
+
+/* =====================================================================
+   4. Routing and the page shell
+   ===================================================================== */
+var NAV = [['overview', 'Overview', 'grid'], ['projects', 'Projects', 'folder'], ['vendors', 'Vendors', 'users'], ['settings', 'Settings', 'gear']];
+var PTABS = [['dashboard', 'Dashboard'], ['budget', 'Budget'], ['costs', 'Costs'], ['changes', 'Change orders']];
+var gs = window.google && google.script;
+
+function parseRoute(hash) {
+  var parts = String(hash || '').replace(/^#?\/?/, '').split('/');
+  if (parts[0] === 'p' && parts[1]) return { view: 'project', id: parts[1], tab: parts[2] || 'dashboard' };
+  if (parts[0] === 'v' && parts[1]) return { view: 'vendor', id: parts[1] };
+  if (['projects', 'vendors', 'settings'].indexOf(parts[0]) >= 0) return { view: parts[0] };
+  return { view: 'overview' };
+}
+function go(hash, replace) {
+  S.route = parseRoute(hash);
+  S.panel = null;
+  try {
+    if (gs && gs.history) gs.history[replace ? 'replace' : 'push'](null, null, hash);
+  } catch (e) { /* history is a convenience only */ }
+  render();
+  window.scrollTo(0, 0);
+}
+
+function render() {
+  if (!S.data) return;
+  var active = document.activeElement;
+  var keep = active && active.id && active.closest && active.closest('#main, #panelHost')
+    ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null;
+  var r = S.route;
+  if (r.view === 'project' && !project(r.id)) r = S.route = { view: 'projects' };
+  if (r.view === 'vendor' && !vendor(r.id)) r = S.route = { view: 'vendors' };
+  var navKey = r.view === 'project' ? 'projects' : r.view === 'vendor' ? 'vendors' : r.view;
+  $('#sideNav').innerHTML = NAV.map(function (n) {
+    return '<button class="side-item" data-go="' + n[0] + '"' + (navKey === n[0] ? ' aria-current="page"' : '') + '>' + icon(n[2]) + esc(n[1]) + '</button>';
+  }).join('');
+  $('#tabbar').innerHTML = NAV.map(function (n) {
+    return '<button class="tab" data-go="' + n[0] + '"' + (navKey === n[0] ? ' aria-current="page"' : '') + '>' + icon(n[2]) + esc(n[1]) + '</button>';
+  }).join('');
+  var html = r.view === 'overview' ? viewOverview() : r.view === 'projects' ? viewProjects()
+    : r.view === 'project' ? viewProject(r) : r.view === 'vendors' ? viewVendors()
+    : r.view === 'vendor' ? viewVendor(r.id) : viewSettings();
+  $('#main').innerHTML = '<div class="view">' + html + '</div>';
+  $('#fab').hidden = !S.data.projects.some(function (p) { return !p.archived; });
+  renderPanel();
+  fillIcons();
+  if (keep) {
+    var el = document.getElementById(keep.id);
+    if (el) {
+      el.focus();
+      try { if (keep.start !== null && el.type !== 'date') el.setSelectionRange(keep.start, keep.end); } catch (e) { /* not a text field */ }
+    }
+  }
+  if (S.ui.focusCat) {
+    var row = $('tr.cat[data-cat="' + cssEsc(S.ui.focusCat) + '"]');
+    S.ui.focusCat = null;
+    if (row) row.scrollIntoView({ block: 'center' });
+  }
+}
+function cssEsc(s) { return String(s).replace(/["\\]/g, '\\$&'); }
+function fillIcons() {
+  $all('[data-icon]').forEach(function (el) { if (!el.firstChild) el.innerHTML = icon(el.getAttribute('data-icon')); });
+}
+function head(overline, title, sub, actions) {
+  return '<div class="view-head"><div>' + (overline ? '<div class="overline">' + overline + '</div>' : '') +
+    '<h1 class="display">' + esc(title) + '</h1>' + (sub ? '<p class="body-2">' + sub + '</p>' : '') + '</div>' +
+    (actions ? '<div class="head-actions">' + actions + '</div>' : '') + '</div>';
+}
+function tile(label, value, sub, cls) {
+  return '<div class="tile ' + (cls || '') + '"><span class="label">' + label + '</span><span class="numeral">' + value +
+    '</span>' + (sub ? '<span class="sub">' + sub + '</span>' : '') + '</div>';
+}
+function emptyState(ic, title, text, btn) {
+  return '<div class="card"><div class="empty"><span class="empty-icon">' + icon(ic) + '</span><h2 class="title">' + esc(title) +
+    '</h2><p class="body-2">' + text + '</p>' + (btn || '') + '</div></div>';
+}
+function overUnder(v) {
+  if (Math.abs(v) < 0.5) return { text: 'On budget', cls: '' };
+  return v < 0 ? { text: money(-v) + ' over', cls: 'is-warn' } : { text: money(v) + ' under', cls: 'is-good' };
+}
+function statusChip(st) {
+  var m = { done: ['done-chip', 'Done'], over: ['s-overdue', 'Over budget'], unbudgeted: ['s-due_soon', 'Unbudgeted'],
+    progress: ['s-on_track', 'In progress'], none: ['s-unscheduled', 'Not started'] }[st];
+  return '<span class="status ' + m[0] + '">' + m[1] + '</span>';
+}
+function typeChip(t) { return '<span class="tag tag-neutral" style="margin-top:0">' + esc(t) + '</span>'; }
+function useBar(actual, budget) {
+  var over = actual > budget + 0.005;
+  var w = budget > 0 ? Math.min(actual / budget, 1) * 100 : (actual > 0 ? 100 : 0);
+  return '<span class="bar-track"><span class="bar-fill' + (over ? ' is-over' : '') + '" style="width:' + w.toFixed(1) + '%"></span></span>';
+}
+
+/* =====================================================================
+   5. Overview and Projects
+   ===================================================================== */
+function viewOverview() {
+  var list = activeProjects();
+  if (!S.data.projects.length) {
+    return head('', 'Overview') + emptyState('folder', 'Start your first project',
+      'Create a project to set a budget and start logging costs against it. Or load the demo job to look around first.',
+      '<div><button class="btn btn-primary" data-act="new-project">' + icon('plus') + 'New project</button> ' +
+      '<button class="btn btn-secondary" data-act="load-demo">Load demo project</button></div>');
+  }
+  var cs = list.map(function (p) { return calc(p.id); });
+  cs.sort(function (a, b) {
+    var la = a.rows.reduce(function (m, r) { return r.last > m ? r.last : m; }, a.p.created || '');
+    var lb = b.rows.reduce(function (m, r) { return r.last > m ? r.last : m; }, b.p.created || '');
+    return la < lb ? 1 : la > lb ? -1 : 0;
+  });
+  var tb = sum(cs, function (c) { return c.totalBudget; });
+  var sp = sum(cs, function (c) { return c.cost.actual; });
+  var vr = sum(cs, function (c) { return c.cost.variance; });
+  var pr = sum(cs, function (c) { return c.profit; });
+  var ou = overUnder(vr);
+  var html = head('', 'Overview', list.length + (list.length === 1 ? ' active project' : ' active projects'),
+    '<button class="btn btn-secondary btn-sm" data-act="new-project">' + icon('plus') + 'New project</button>');
+  html += '<div class="tiles">' + tile('Total budget', money(tb), 'Including fees', 'is-forest') +
+    tile('Spent to date', money(sp), tb ? pct(sp / Math.max(sum(cs, function (c) { return c.cost.rb; }), 1)) + ' of cost budget' : '') +
+    tile('Projected over / under', ou.text, 'Across active projects', ou.cls) +
+    tile('Projected profit', money(pr), 'Contract price less forecast cost', pr < 0 ? 'is-warn' : '') + '</div>';
+  if (!list.length) return html + emptyState('folder', 'No active projects', 'Closed and archived projects are listed under Projects.');
+  html += '<div class="card flush"><div class="gwrap"><table class="gt"><thead><tr><th>Project</th><th>Type</th><th>Complete</th>' +
+    '<th class="num">Revised budget</th><th class="num">Spent</th><th class="num">Projected</th><th class="num">Margin</th></tr></thead><tbody>';
+  cs.forEach(function (c) {
+    html += '<tr class="line" data-go="p/' + c.p.id + '/dashboard"><td><div class="lname">' + esc(c.p.name) + '</div><div class="lsub">' +
+      esc([c.p.location, c.p.status].filter(Boolean).join(' \u00b7 ')) + '</div></td><td>' + typeChip(c.p.type) + '</td>' +
+      '<td><span class="usebar">' + useBar(c.pct, 1) + '</span> ' + pct(c.pct) + '</td>' +
+      '<td class="num">' + money(c.cost.rb) + '</td><td class="num">' + money(c.cost.actual) + '</td>' +
+      '<td class="num">' + varText(c.cost.variance) + '</td><td class="num">' + (c.margin === null ? '\u2014' : pct1(c.margin)) + '</td></tr>';
+  });
+  return html + '</tbody></table></div></div>';
+}
+
+function viewProjects() {
+  var types = { '': 0, Residential: 0, Commercial: 0 };
+  var all = S.data.projects.filter(function (p) { return S.ui.showArchived || !p.archived; });
+  all.forEach(function (p) { types['']++; types[p.type] = (types[p.type] || 0) + 1; });
+  var list = all.filter(function (p) { return !S.ui.projType || p.type === S.ui.projType; });
+  var html = head('', 'Projects', '', '<button class="btn btn-primary btn-sm" data-act="new-project">' + icon('plus') + 'New project</button>');
+  html += '<div class="bar-right"><div class="chips wrap" style="margin:0">' + [['', 'All'], ['Residential', 'Residential'], ['Commercial', 'Commercial']].map(function (t) {
+    return '<button class="chip" data-act="proj-type" data-type="' + t[0] + '" aria-selected="' + (S.ui.projType === t[0]) + '">' + t[1] + ' <span class="n">' + (types[t[0]] || 0) + '</span></button>';
+  }).join('') + '</div><span class="spacer"></span><label class="switch-row"><input type="checkbox" id="showArchived" data-change="show-archived"' +
+    (S.ui.showArchived ? ' checked' : '') + '><span class="switch"></span>Show archived</label></div>';
+  if (!list.length) {
+    return html + emptyState('folder', 'No projects here yet', 'Create a project to set a budget and start logging costs against it.',
+      '<button class="btn btn-primary" data-act="new-project">' + icon('plus') + 'New project</button>');
+  }
+  html += '<div class="card flush"><div class="gwrap"><table class="gt"><thead><tr><th>Project</th><th>Type</th><th>Status</th><th>Client</th>' +
+    '<th class="num">Budget</th><th class="num">Spent</th><th>Complete</th></tr></thead><tbody>';
+  list.slice().sort(by('name')).forEach(function (p) {
+    var c = calc(p.id);
+    html += '<tr class="line" data-go="p/' + p.id + '/dashboard"><td><div class="lname">' + esc(p.name) + '</div><div class="lsub">' + esc(p.location) +
+      '</div></td><td>' + typeChip(p.type) + '</td><td>' + esc(p.archived ? 'Archived' : p.status) + '</td><td>' + esc(p.client) + '</td>' +
+      '<td class="num">' + money(c.totalBudget) + '</td><td class="num">' + money(c.cost.actual) + '</td>' +
+      '<td><span class="usebar">' + useBar(c.pct, 1) + '</span> ' + pct(c.pct) + '</td></tr>';
+  });
+  return html + '</tbody></table></div></div>';
+}
+
+/* =====================================================================
+   6. Project: header, dashboard
+   ===================================================================== */
+function viewProject(r) {
+  var c = calc(r.id), p = c.p;
+  var html = '<button class="back-btn" data-go="projects">' + icon('back') + 'Projects</button>';
+  html += head(esc(p.type) + ' \u00b7 ' + esc(p.archived ? 'Archived' : p.status), p.name,
+    esc([p.location, p.client].filter(Boolean).join(' \u00b7 ')),
+    '<button class="icon-btn" data-act="edit-project" title="Edit project" aria-label="Edit project">' + icon('edit') + '</button>');
+  html += '<div class="segmented" role="tablist">' + PTABS.map(function (t) {
+    return '<button class="seg' + (r.tab === t[0] ? ' is-on' : '') + '" data-go="p/' + p.id + '/' + t[0] + '">' + t[1] + '</button>';
+  }).join('') + '</div>';
+  return html + (r.tab === 'budget' ? tabBudget(c) : r.tab === 'costs' ? tabCosts(c) : r.tab === 'changes' ? tabChanges(c) : tabDashboard(c));
+}
+
+function tabDashboard(c) {
+  var p = c.p, ou = overUnder(c.cost.variance);
+  if (!c.cost.rb && !c.cost.actual) {
+    return emptyState('ruler', 'Set the budget to get started',
+      'Enter a budget for each line item, then log costs as invoices come in. The dashboard fills in as you go.',
+      '<button class="btn btn-primary" data-go="p/' + p.id + '/budget">Enter the budget</button>');
+  }
+  var html = '<div class="tiles">' +
+    tile('Percent complete', pct(c.pct), c.hasExcluded ? 'Construction cost, excluding land' : 'By cost', 'is-forest') +
+    tile('Spent to date', money(c.cost.actual), 'of ' + money(c.cost.rb) + ' budget (' + pct(c.used) + ')') +
+    tile('Projected over / under', ou.text, 'Forecast ' + money(c.cost.forecast), ou.cls) +
+    tile('Projected margin', c.margin === null ? '\u2014' : pct1(c.margin),
+      money(c.profit) + ' profit' + (c.origMargin === null ? '' : ' \u00b7 planned ' + pct1(c.origMargin)), c.profit < 0 ? 'is-warn' : '') + '</div>';
+
+  // Budget bar
+  var max = Math.max(c.cost.rb, c.cost.forecast, c.cost.actual, 1);
+  var bx = c.cost.rb / max * 100;
+  html += '<div class="card"><div class="card-head"><h2 class="title">Cost to date</h2><span class="label">' +
+    (p.budgetFinal ? 'Contract price ' + money(c.contract) : 'Budget not finalized yet') + '</span></div>' +
+    '<div class="bbar"><div class="fill" style="width:' + (c.cost.actual / max * 100).toFixed(2) + '%"></div>' +
+    (c.cost.forecast > c.cost.rb + 0.005 ? '<div class="over" style="left:' + bx.toFixed(2) + '%;width:' + ((c.cost.forecast - c.cost.rb) / max * 100).toFixed(2) + '%"></div>' : '') +
+    '<div class="mark' + (bx > 88 ? ' is-end' : '') + '" style="left:' + bx.toFixed(2) + '%"><span>Budget</span></div></div>' +
+    '<div class="legend"><span><strong>' + money(c.cost.actual) + '</strong>Spent to date</span><span><strong>' + money(c.cost.rb) +
+    '</strong>Revised budget</span><span><strong>' + money(c.cost.forecast) + '</strong>Forecast final cost</span><span><strong>' +
+    money(c.cost.remaining) + '</strong>Still to spend</span>' +
+    (c.fee.rb ? '<span><strong>' + money(c.fee.actual) + '</strong>Fee invoiced of ' + money(c.fee.rb) + '</span>' : '') + '</div></div>';
+
+  // Left column
+  var left = '<div class="card list"><div class="card-head"><h2 class="title">By category</h2><span class="label">Budget vs actual</span></div>' +
+    '<div class="cat-row is-head"><span>Category</span><span></span><span class="num">Actual</span><span class="num">Budget</span><span class="num">Variance</span></div>';
+  c.cats.filter(function (k) { return k.t.rb || k.t.actual; }).forEach(function (k) {
+    left += '<div class="cat-row" data-act="open-cat" data-cat="' + esc(k.name) + '"><span class="cat-name">' + esc(k.name) + '</span>' + useBar(k.t.actual, k.t.rb) +
+      '<span class="num">' + money(k.t.actual) + '</span><span class="num muted">' + money(k.t.rb) + '</span><span class="num">' + varText(k.t.variance) + '</span></div>';
+  });
+  left += '</div><div class="card"><div class="card-head"><h2 class="title">Spend over time</h2><span class="label">Cumulative</span></div>' + spendChart(c) + '</div>';
+
+  // Right column
+  var right = '<div class="card list"><div class="card-head"><h2 class="title">Needs attention</h2><span class="label">' + (c.flags.length || '') + '</span></div>';
+  if (!c.flags.length) right += '<div class="all-good">' + icon('check') + 'Everything is on budget.</div>';
+  c.flags.slice(0, 8).forEach(function (f) {
+    right += '<div class="flag-row" ' + (f.lineId ? 'data-act="open-line" data-id="' + f.lineId + '"' : 'data-act="open-cat" data-cat="' + esc(f.cat) + '"') + '><div class="grow"><div class="name">' +
+      esc(f.name) + '</div><div class="what">' + esc(f.what) + '</div></div><span class="status ' + (f.kind === 'over' ? 's-overdue' : 's-due_soon') + '">' + esc(f.label) + '</span></div>';
+  });
+  if (c.flags.length > 8) right += '<p class="footnote">' + (c.flags.length - 8) + ' more on the Budget tab.</p>';
+  right += '</div>';
+
+  var costs = [];
+  c.rows.forEach(function (r) { if (!r.li.fee) r.costs.forEach(function (x) { costs.push({ c: x, r: r }); }); });
+  var byVendor = {};
+  costs.forEach(function (x) { byVendor[x.c.vendorId] = round2((byVendor[x.c.vendorId] || 0) + x.c.amount); });
+  var top = Object.keys(byVendor).map(function (id) { return { id: id, amt: byVendor[id] }; }).sort(function (a, b) { return b.amt - a.amt; }).slice(0, 5);
+  if (top.length) {
+    right += '<div class="card"><div class="card-head"><h2 class="title">Top vendors</h2><span class="label">By spend</span></div><div class="bars">';
+    top.forEach(function (v) {
+      right += '<div class="bar-row" style="grid-template-columns:minmax(0,1.2fr) 1fr auto;cursor:pointer" data-go="v/' + v.id + '"><span class="bar-label">' + esc(vendorName(v.id)) +
+        '</span><span class="bar-track"><span class="bar-fill" style="width:' + Math.max(v.amt / top[0].amt * 100, 2).toFixed(1) + '%"></span></span><span class="bar-val">' + money(v.amt) + '</span></div>';
+    });
+    right += '</div></div>';
+  }
+  var recent = [];
+  c.rows.forEach(function (r) { r.costs.forEach(function (x) { recent.push({ c: x, r: r }); }); });
+  recent.sort(function (a, b) { return a.c.date < b.c.date ? 1 : a.c.date > b.c.date ? -1 : 0; });
+  if (recent.length) {
+    right += '<div class="card list"><div class="card-head"><h2 class="title">Recent costs</h2><button class="btn-text" data-go="p/' + p.id + '/costs">See all</button></div>';
+    recent.slice(0, 8).forEach(function (x) {
+      right += '<div class="mini-row" style="cursor:pointer" data-act="edit-cost" data-id="' + x.c.id + '"><div class="grow"><div class="name">' + esc(vendorName(x.c.vendorId)) +
+        '</div><div class="what">' + esc(fmtDate(x.c.date) + ' \u00b7 ' + x.r.li.name) + '</div></div><span class="num">' + money2(x.c.amount) + '</span></div>';
+    });
+    right += '</div>';
+  }
+  return html + '<div class="grid-2"><div>' + left + '</div><div>' + right + '</div></div>';
+}
+
+function spendChart(c) {
+  var byMonth = {};
+  c.rows.forEach(function (r) {
+    if (r.li.fee) return;
+    r.costs.forEach(function (x) { var m = x.date.slice(0, 7); byMonth[m] = (byMonth[m] || 0) + x.amount; });
+  });
+  var keys = Object.keys(byMonth).sort();
+  if (!keys.length) return '<p class="footnote">No costs logged yet.</p>';
+  function addMonth(k, n) { var y = +k.slice(0, 4), m = +k.slice(5, 7) - 1 + n; y += Math.floor(m / 12); m = ((m % 12) + 12) % 12; return y + '-' + (m < 9 ? '0' : '') + (m + 1); }
+  var months = [addMonth(keys[0], -1)], last = keys[keys.length - 1];
+  while (months[months.length - 1] < last && months.length < 120) months.push(addMonth(months[months.length - 1], 1));
+  var run = 0, pts = months.map(function (m) { run += byMonth[m] || 0; return run; });
+  var top = Math.max(run, c.cost.rb, 1);
+  var p10 = Math.pow(10, Math.floor(Math.log(top) / Math.LN10)), mant = top / p10;
+  var yMax = (mant <= 1 ? 1 : mant <= 2 ? 2 : mant <= 2.5 ? 2.5 : mant <= 5 ? 5 : 10) * p10;
+  var W = 640, H = 230, L = 50, R = 14, T = 12, B = 28;
+  function x(i) { return L + (W - L - R) * (months.length === 1 ? 0 : i / (months.length - 1)); }
+  function y(v) { return T + (H - T - B) * (1 - v / yMax); }
+  var svg = '<svg class="odo-svg spark" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Cumulative spend by month">';
+  for (var g = 0; g <= 4; g++) {
+    var gv = yMax * g / 4;
+    svg += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(gv) + '" y2="' + y(gv) + '"/><text class="axis" x="' + (L - 8) + '" y="' + (y(gv) + 4) + '" text-anchor="end">' + moneyShort(gv) + '</text>';
+  }
+  var step = Math.ceil(months.length / 8);
+  months.forEach(function (m, i) {
+    if (i % step === 0 || i === months.length - 1 && i % step > step / 2) svg += '<text class="axis" x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="middle">' + MONTHS[+m.slice(5, 7) - 1] + (m.slice(5, 7) === '01' || i === 0 ? " '" + m.slice(2, 4) : '') + '</text>';
+  });
+  if (c.cost.rb > 0) svg += '<line class="est" x1="' + L + '" x2="' + (W - R) + '" y1="' + y(c.cost.rb) + '" y2="' + y(c.cost.rb) + '"/>';
+  svg += '<polyline class="line" points="' + pts.map(function (v, i) { return x(i).toFixed(1) + ',' + y(v).toFixed(1); }).join(' ') + '"/>';
+  if (months.length <= 24) pts.forEach(function (v, i) { svg += '<circle class="dot" r="3.5" cx="' + x(i).toFixed(1) + '" cy="' + y(v).toFixed(1) + '"><title>' + MONTHS[+months[i].slice(5, 7) - 1] + ' ' + months[i].slice(0, 4) + ': ' + money(v) + '</title></circle>'; });
+  return '<div class="chart">' + svg + '</svg><div class="chart-key"><span class="key-line"></span>Spent to date' +
+    (c.cost.rb > 0 ? '<span class="key-dash"></span>Revised budget ' + money(c.cost.rb) : '') + '</div></div>';
+}
+
+/* =====================================================================
+   7. Project: budget table and line item panel
+   ===================================================================== */
+function hideEmpty(p) { var v = S.ui.hideEmpty[p.id]; return v === undefined ? !!p.budgetFinal : v; }
+
+function tabBudget(c) {
+  var p = c.p, hide = hideEmpty(p), edit = !p.budgetFinal;
+  var html = '<div class="bar-right"><label class="switch-row"><input type="checkbox" id="hideEmpty" data-change="hide-empty"' + (hide ? ' checked' : '') +
+    '><span class="switch"></span>Hide empty lines</label><span class="spacer"></span>' +
+    '<button class="btn btn-secondary btn-sm" data-act="export-budget">' + icon('download') + 'Export</button>' +
+    '<button class="btn btn-secondary btn-sm" data-act="new-line">' + icon('plus') + 'Add line item</button>' +
+    (edit ? '<button class="btn btn-primary btn-sm" data-act="finalize">Finalize budget</button>'
+      : '<span class="body-2">Budget finalized \u00b7 <button class="btn-text" style="height:auto" data-act="unlock">Unlock</button></span>') + '</div>';
+  if (edit) html += '<p class="footnote">Type a budget for each line. Tab or Enter moves to the next line. Finalizing locks these as the original budget; later changes go through change orders.</p>';
+  html += '<div class="card flush"><div class="gwrap"><table class="gt" id="budgetTable"><thead><tr><th>Line item</th><th class="num">Original</th><th class="num">Changes</th>' +
+    '<th class="num">Revised</th><th class="num">Actual</th><th class="num">Remaining</th><th class="num">Variance</th><th>Used</th><th>Status</th><th class="num">Done</th></tr></thead><tbody>';
+  function n(v, blankZero) { return blankZero && Math.abs(v) < 0.005 ? '<span class="zero">\u2014</span>' : money(v); }
+  function lineRow(r, isFee) {
+    var li = r.li;
+    return '<tr class="line' + (isFee ? ' fee' : '') + '" data-act="open-line" data-id="' + li.id + '"><td><div class="lname">' + esc(li.name) + '</div>' +
+      (isFee ? '<div class="lsub">Contractor fee \u00b7 your invoices, not counted as cost</div>' : li.excludeProgress ? '<div class="lsub">Not counted in percent complete</div>' : '') + '</td>' +
+      '<td class="num">' + (edit ? '<input class="cell-in" id="b_' + li.id + '" data-budget="' + li.id + '" inputmode="decimal" value="' + (r.ob ? num(r.ob, r.ob % 1 ? 2 : 0) : '') + '" placeholder="0" aria-label="Budget for ' + esc(li.name) + '">' : n(r.ob, true)) + '</td>' +
+      '<td class="num">' + (r.co ? (r.co > 0 ? '+' : '') + money(r.co) : '<span class="zero">\u2014</span>') + '</td><td class="num">' + n(r.rb, true) + '</td>' +
+      '<td class="num">' + n(r.actual, true) + '</td><td class="num">' + n(r.remaining, true) + '</td><td class="num">' + (isFee ? '<span class="zero">\u2014</span>' : varText(r.variance)) + '</td>' +
+      '<td><span class="usebar">' + useBar(r.actual, r.rb) + '</span></td><td>' + statusChip(r.status) + '</td>' +
+      '<td class="num"><button class="check' + (li.done ? ' is-done' : '') + '" data-act="toggle-done" data-id="' + li.id + '" aria-label="' + (li.done ? 'Reopen ' : 'Mark done: ') + esc(li.name) + '" aria-pressed="' + !!li.done + '"></button></td></tr>';
+  }
+  var shown = 0;
+  c.cats.forEach(function (k) {
+    var lines = k.lines.filter(function (r) { return !hide || r.ob || r.rb || r.n; });
+    if (!lines.length) return;
+    shown += lines.length;
+    var open = !S.ui.collapsed[p.id + '|' + k.name];
+    html += '<tr class="cat' + (open ? ' is-open' : '') + '" data-act="toggle-cat" data-cat="' + esc(k.name) + '"><td><span class="caret">' + icon('chev') + '</span>' + esc(k.name) +
+      '<span class="count">' + lines.length + (lines.length < k.lines.length ? ' of ' + k.lines.length : '') + '</span></td><td class="num">' + money(k.t.ob) + '</td><td class="num">' +
+      (k.t.co ? (k.t.co > 0 ? '+' : '') + money(k.t.co) : '') + '</td><td class="num">' + money(k.t.rb) + '</td><td class="num">' + money(k.t.actual) + '</td><td class="num">' +
+      money(k.t.remaining) + '</td><td class="num">' + varText(k.t.variance) + '</td><td><span class="usebar">' + useBar(k.t.actual, k.t.rb) + '</span></td><td></td><td></td></tr>';
+    if (open) html += lines.map(function (r) { return lineRow(r, false); }).join('');
+  });
+  if (!shown) html += '<tr class="empty-row"><td colspan="10">' + (hide ? 'No lines have a budget or costs yet. Turn off "Hide empty lines" to see the full template.' : 'This project has no line items yet.') + '</td></tr>';
+  var t = c.cost;
+  html += '<tr class="total"><td>Total cost</td><td class="num">' + money(t.ob) + '</td><td class="num">' + (t.co ? (t.co > 0 ? '+' : '') + money(t.co) : '') + '</td><td class="num">' + money(t.rb) +
+    '</td><td class="num">' + money(t.actual) + '</td><td class="num">' + money(t.remaining) + '</td><td class="num">' + varText(t.variance) + '</td><td><span class="usebar">' + useBar(t.actual, t.rb) + '</span></td><td></td><td></td></tr>';
+  html += c.feeRows.map(function (r) { return lineRow(r, true); }).join('');
+  if (c.feeRows.length) {
+    html += '<tr class="grand"><td>Total with fee' + (p.budgetFinal ? '<div class="lsub">Contract price ' + money(c.contract) + '</div>' : '') + '</td><td class="num">' + money(c.origTotal) + '</td><td class="num">' +
+      (t.co + c.fee.co ? money(t.co + c.fee.co) : '') + '</td><td class="num">' + money(c.totalBudget) + '</td><td colspan="6"></td></tr>';
+  }
+  return html + '</tbody></table></div></div>';
+}
+
+function renderPanel() {
+  var host = $('#panelHost');
+  if (!S.panel || S.route.view !== 'project') { S.panel = null; host.innerHTML = ''; return; }
+  var c = calc(S.route.id), r = c.byRow[S.panel.lineId];
+  if (!r) { S.panel = null; host.innerHTML = ''; return; }
+  var li = r.li, fee = li.fee;
+  var html = '<div class="sheet-backdrop" data-act="close-panel"></div><aside class="panel" aria-label="Line item detail"><div class="panel-head"><div>' +
+    '<div class="overline">' + esc(li.category) + (fee ? ' \u00b7 Contractor fee' : '') + '</div><h2 class="display">' + esc(li.name) + '</h2><div class="head-meta">' + statusChip(r.status) +
+    (li.excludeProgress ? '<span class="tag tag-neutral" style="margin-top:0">Not in percent complete</span>' : '') + '</div></div>' +
+    '<div class="head-actions"><button class="icon-btn" data-act="edit-line" data-id="' + li.id + '" aria-label="Edit line item" title="Edit line item">' + icon('edit') + '</button>' +
+    '<button class="icon-btn" data-act="close-panel" aria-label="Close">' + icon('x') + '</button></div></div><div class="panel-body">';
+  html += '<div class="stats"><div class="stat"><span class="label">' + (fee ? 'Fee budget' : 'Revised budget') + '</span><span class="val">' + money(r.rb) + '</span></div>' +
+    '<div class="stat"><span class="label">' + (fee ? 'Invoiced' : 'Actual') + '</span><span class="val">' + money2(r.actual) + '</span></div>' +
+    '<div class="stat"><span class="label">' + (fee ? 'Left to invoice' : 'Remaining') + '</span><span class="val">' + money(r.remaining) + '</span></div>' +
+    '<div class="stat"><span class="label">Variance</span><span class="val" style="font-size:20px">' + (fee ? '\u2014' : varText(r.variance)) + '</span></div></div>';
+  if (r.co || r.ob !== r.rb) html += '<p class="footnote" style="margin:-4px 0 0">Original budget ' + money(r.ob) + ', change orders ' + (r.co > 0 ? '+' : '') + money(r.co) + '.</p>';
+  if (li.forecastOverride !== '' && !li.done) html += '<p class="footnote" style="margin:4px 0 0">Expected final cost set to ' + money(li.forecastOverride) + '.</p>';
+  if (li.notes) html += '<p class="footnote" style="margin:4px 0 0">' + esc(li.notes) + '</p>';
+
+  html += '<div class="sec-head"><h3 class="title">' + (fee ? 'Add an invoice' : 'Add a cost') + '</h3></div>' +
+    '<form class="quick" id="quickForm" novalidate><input class="in amt" id="qAmount" inputmode="decimal" placeholder="Amount" aria-label="Amount">' +
+    '<div class="ta" data-ta="vendor"><input class="in" id="qVendor" autocomplete="off" placeholder="Vendor" aria-label="Vendor"><div class="ta-list" hidden></div></div>' +
+    '<button class="btn btn-primary" type="submit">Add</button></form>' +
+    '<p class="field-hint" style="margin:0">Dated today. Use Add cost for a different date or a note.</p>';
+
+  html += '<div class="sec-head"><h3 class="title">Entries <span class="muted" style="font-weight:400">' + r.n + '</span></h3>' +
+    (r.n > 1 ? '<button class="btn-text" style="height:auto" data-act="toggle-group">' + (S.panel.group ? 'Show by date' : 'Group by vendor') + '</button>' : '') + '</div>';
+  if (!r.n) html += '<p class="body-2">Nothing logged on this line yet.</p>';
+  function entry(x, showVendor) {
+    return '<div class="entry" data-act="edit-cost" data-id="' + x.id + '"><div class="grow"><div class="when">' + esc(showVendor ? vendorName(x.vendorId) : fmtDate(x.date)) + '</div><div class="what">' +
+      esc((showVendor ? fmtDate(x.date) : '') + (x.note ? (showVendor ? ' \u00b7 ' : '') + x.note : '')) + '</div></div><span class="amt">' + money2(x.amount) + '</span></div>';
+  }
+  if (S.panel.group && r.n > 1) {
+    var groups = {}, order = [];
+    r.costs.forEach(function (x) { if (!groups[x.vendorId]) { groups[x.vendorId] = []; order.push(x.vendorId); } groups[x.vendorId].push(x); });
+    order.sort(function (a, b) { return sum(groups[b], amt) - sum(groups[a], amt); });
+    order.forEach(function (vid) {
+      html += '<div class="entry is-sub"><div class="grow"><div class="when">' + esc(vendorName(vid)) + '</div></div><span class="amt">' + money2(sum(groups[vid], amt)) + '</span></div>' +
+        groups[vid].map(function (x) { return entry(x, false); }).join('');
+    });
+  } else {
+    html += r.costs.map(function (x) { return entry(x, true); }).join('');
+  }
+  if (r.n) html += '<div class="entry is-total"><div class="grow"><div class="when">Total</div></div><span class="amt">' + money2(r.actual) + '</span></div>';
+
+  var cos = c.cos.filter(function (o) { return o.lineItemId === li.id; });
+  if (cos.length) {
+    html += '<div class="sec-head"><h3 class="title">Change orders</h3></div>' + cos.map(function (o) {
+      return '<div class="entry" data-act="edit-co" data-id="' + o.id + '"><div class="grow"><div class="when">CO ' + esc(o.number) + ' \u00b7 ' + esc(o.description) + '</div><div class="what">' +
+        esc(fmtDate(o.date) + ' \u00b7 ' + o.status) + '</div></div><span class="amt">' + (o.budgetChange > 0 ? '+' : '') + money(o.budgetChange) + '</span></div>';
+    }).join('');
+  }
+  html += '<div class="sec-head"></div><button class="btn btn-secondary" style="width:100%" data-act="toggle-done" data-id="' + li.id + '">' +
+    (li.done ? 'Reopen this line' : icon('check') + 'Mark as done') + '</button>' +
+    '<p class="field-hint" style="margin:8px 0 0">' + (li.done ? 'Done' + (li.doneDate ? ' on ' + fmtDate(li.doneDate) : '') + '. Forecast equals actual.' : 'Marking a line done sets its forecast to what was actually spent.') + '</p>';
+  var wasOpen = !!host.firstChild, scroll = wasOpen && $('.panel-body', host) ? $('.panel-body', host).scrollTop : 0;
+  host.innerHTML = html + '</div></aside>';
+  if (wasOpen) {
+    $all('.sheet-backdrop, .panel', host).forEach(function (el) { el.style.animation = 'none'; });
+    $('.panel-body', host).scrollTop = scroll;
+  }
+}
+function amt(x) { return x.amount; }
+
+/* =====================================================================
+   8. Project: costs ledger and change orders
+   ===================================================================== */
+function ledgerRows(c) {
+  var f = S.ui.ledger, q = f.q.trim().toLowerCase(), out = [];
+  c.rows.forEach(function (r) {
+    if (f.cat && r.li.category !== f.cat) return;
+    r.costs.forEach(function (x) {
+      if (f.vendor && x.vendorId !== f.vendor) return;
+      if (f.from && x.date < f.from) return;
+      if (f.to && x.date > f.to) return;
+      var vn = vendorName(x.vendorId);
+      if (q && (vn + ' ' + x.note + ' ' + r.li.name).toLowerCase().indexOf(q) < 0) return;
+      out.push({ id: x.id, date: x.date, line: r.li.name, category: r.li.category, vendor: vn, note: x.note, amount: x.amount, fee: r.li.fee });
+    });
+  });
+  out.sort(function (a, b) {
+    var k = f.sort, av = k === 'amount' ? a[k] : String(a[k]).toLowerCase(), bv = k === 'amount' ? b[k] : String(b[k]).toLowerCase();
+    return (av < bv ? -1 : av > bv ? 1 : 0) * f.dir || (a.date < b.date ? 1 : -1);
+  });
+  return out;
+}
+function tabCosts(c) {
+  var f = S.ui.ledger, rows = ledgerRows(c), vendorIds = {};
+  c.rows.forEach(function (r) { r.costs.forEach(function (x) { vendorIds[x.vendorId] = 1; }); });
+  function opt(v, label, sel) { return '<option value="' + esc(v) + '"' + (sel === v ? ' selected' : '') + '>' + esc(label) + '</option>'; }
+  var html = '<div class="filters"><label class="filter"><span class="label">Search</span><input class="in" id="q" data-ledger="q" value="' + esc(f.q) + '" placeholder="Vendor, note or line" style="height:44px"></label>' +
+    '<label class="filter"><span class="label">Category</span><select id="lCat" data-ledger="cat">' + opt('', 'All categories', f.cat) +
+    c.cats.concat(c.feeRows.length ? [{ name: c.feeRows[0].li.category }] : []).map(function (k) { return k.name; }).filter(function (v, i, a) { return a.indexOf(v) === i; }).map(function (k) { return opt(k, k, f.cat); }).join('') + '</select></label>' +
+    '<label class="filter"><span class="label">Vendor</span><select id="lVendor" data-ledger="vendor">' + opt('', 'All vendors', f.vendor) +
+    Object.keys(vendorIds).map(function (id) { return { id: id, name: vendorName(id) }; }).sort(by('name')).map(function (v) { return opt(v.id, v.name, f.vendor); }).join('') + '</select></label>' +
+    '<label class="filter"><span class="label">From</span><input type="date" class="in" id="lFrom" data-ledger="from" value="' + esc(f.from) + '" style="height:44px;min-height:44px;line-height:42px"></label>' +
+    '<label class="filter"><span class="label">To</span><input type="date" class="in" id="lTo" data-ledger="to" value="' + esc(f.to) + '" style="height:44px;min-height:44px;line-height:42px"></label></div>';
+  function th(key, label, cls) { return '<th class="' + (cls || '') + '" data-sort="' + key + '">' + label + (f.sort === key ? (f.dir > 0 ? ' ↑' : ' ↓') : '') + '</th>'; }
+  html += '<div class="bar-right"><span class="body-2">' + rows.length + (rows.length === 1 ? ' entry' : ' entries') + ' · ' + money2(sum(rows, amt)) + '</span><span class="spacer"></span>' +
+    (f.q || f.cat || f.vendor || f.from || f.to ? '<button class="btn-text" style="height:auto" data-act="clear-ledger">Clear filters</button>' : '') +
+    '<button class="btn btn-secondary btn-sm" data-act="export-costs">' + icon('download') + 'Export CSV</button></div>';
+  html += '<div class="card flush"><div class="gwrap"><table class="gt"><thead><tr>' + th('date', 'Date') + th('line', 'Line item') + th('vendor', 'Vendor') + th('note', 'Note') + th('amount', 'Amount', 'num') + '</tr></thead><tbody>';
+  if (!rows.length) html += '<tr class="empty-row"><td colspan="5">' + (c.rows.some(function (r) { return r.n; }) ? 'No entries match these filters.' : 'No costs yet. Add the first invoice for this job.') + '</td></tr>';
+  rows.forEach(function (x) {
+    html += '<tr class="line" data-act="edit-cost" data-id="' + x.id + '"><td style="white-space:nowrap">' + esc(fmtDate(x.date)) + '</td><td><div class="lname">' + esc(x.line) + '</div><div class="lsub">' + esc(x.category) + (x.fee ? ' · Fee invoice' : '') + '</div></td><td>' +
+      esc(x.vendor) + '</td><td class="muted">' + esc(x.note) + '</td><td class="num">' + money2(x.amount) + '</td></tr>';
+  });
+  return html + '</tbody></table></div></div>';
+}
+
+function tabChanges(c) {
+  var p = c.p;
+  var html = '<div class="tiles">' + tile('Original contract', money(c.contractOrig), p.budgetFinal ? 'Budget including fee' : 'Provisional until the budget is finalized') +
+    tile('Approved changes', (c.contractChanges > 0 ? '+' : '') + money(c.contractChanges), 'To the contract price') +
+    tile('Current contract', money(c.contract), 'Revised cost budget ' + money(c.cost.rb), 'is-forest') +
+    tile('Pending', money(c.pendingContract), c.pendingBudget ? money(c.pendingBudget) + ' of budget waiting on approval' : 'Not yet approved') + '</div>';
+  html += '<div class="bar-right"><span class="spacer"></span><button class="btn btn-primary btn-sm" data-act="new-co"' + (p.budgetFinal ? '' : ' disabled') + '>' + icon('plus') + 'New change order</button></div>';
+  if (!p.budgetFinal) return html + emptyState('edit', 'Finalize the budget first', 'While a project is in planning you can edit budgets directly. Change orders start once the budget is finalized.',
+    '<button class="btn btn-secondary" data-go="p/' + p.id + '/budget">Go to the budget</button>');
+  if (!c.cos.length) return html + emptyState('edit', 'No change orders', 'Use a change order whenever the budget or the contract price changes, so the original numbers stay on record.');
+  html += '<div class="card flush"><div class="gwrap"><table class="gt"><thead><tr><th>No.</th><th>Date</th><th>Description</th><th>Line item</th><th class="num">Budget change</th><th class="num">Contract change</th><th>Status</th></tr></thead><tbody>';
+  c.cos.slice().sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; }).forEach(function (o) {
+    var li = lineItem(o.lineItemId);
+    function d(v) { return v ? (v > 0 ? '+' : '') + money(v) : '<span class="zero">—</span>'; }
+    html += '<tr class="line" data-act="edit-co" data-id="' + o.id + '"><td>' + esc(o.number) + '</td><td style="white-space:nowrap">' + esc(fmtDate(o.date)) + '</td><td><div class="lname">' + esc(o.description) + '</div></td><td>' +
+      (li ? esc(li.name) + '<div class="lsub">' + esc(li.category) + '</div>' : '<span class="zero">—</span>') + '</td><td class="num">' + d(o.budgetChange) + '</td><td class="num">' + d(o.contractChange) +
+      '</td><td><span class="status ' + (o.status === 'Approved' ? 'done-chip' : 's-due_soon') + '">' + esc(o.status) + '</span></td></tr>';
+  });
+  return html + '</tbody></table></div></div>';
+}
+
+/* =====================================================================
+   9. Vendors and Settings
+   ===================================================================== */
+function vendorStats() {
+  var st = {};
+  S.data.costs.forEach(function (x) {
+    var s = st[x.vendorId] || (st[x.vendorId] = { total: 0, n: 0, projects: {} });
+    s.total += x.amount; s.n++; s.projects[x.projectId] = 1;
+  });
+  return st;
+}
+function viewVendors() {
+  var st = vendorStats(), q = S.ui.vendorQ.trim().toLowerCase();
+  var list = S.data.vendors.filter(function (v) { return !v.archived && (!q || (v.name + ' ' + v.trade).toLowerCase().indexOf(q) >= 0); }).sort(function (a, b) {
+    return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1;
+  });
+  var html = head('', 'Vendors', '', '<button class="btn btn-primary btn-sm" data-act="new-vendor">' + icon('plus') + 'New vendor</button>');
+  html += '<div class="toolbar"><label class="search">' + icon('search') + '<input id="q" data-vendor-q value="' + esc(S.ui.vendorQ) + '" placeholder="Search vendors" aria-label="Search vendors"></label></div>';
+  if (!list.length) return html + emptyState('users', q ? 'No vendors match' : 'No vendors yet', q ? 'Try a different search.' : 'Vendors are added automatically the first time you log a cost for them.');
+  html += '<div class="card flush"><div class="gwrap"><table class="gt"><thead><tr><th>Vendor</th><th>Trade</th><th>Phone</th><th>Email</th><th class="num">Projects</th><th class="num">Total paid</th></tr></thead><tbody>';
+  list.forEach(function (v) {
+    var s = st[v.id] || { total: 0, projects: {} };
+    html += '<tr class="line" data-go="v/' + v.id + '"><td><div class="lname">' + esc(v.name) + '</div></td><td>' + esc(v.trade) + '</td><td>' + esc(v.phone) + '</td><td>' + esc(v.email) +
+      '</td><td class="num">' + Object.keys(s.projects).length + '</td><td class="num">' + money(s.total) + '</td></tr>';
+  });
+  return html + '</tbody></table></div></div>';
+}
+function viewVendor(id) {
+  var v = vendor(id), costs = S.data.costs.filter(function (x) { return x.vendorId === id; });
+  var html = '<button class="back-btn" data-go="vendors">' + icon('back') + 'Vendors</button>' +
+    head(esc(v.trade || 'Vendor'), v.name, esc([v.phone, v.email].filter(Boolean).join(' · ')),
+      '<button class="btn btn-secondary btn-sm" data-act="merge-vendor" data-id="' + id + '">Merge into…</button>' +
+      '<button class="icon-btn" data-act="edit-vendor" data-id="' + id + '" aria-label="Edit vendor" title="Edit vendor">' + icon('edit') + '</button>');
+  var pids = [];
+  costs.forEach(function (x) { if (pids.indexOf(x.projectId) < 0) pids.push(x.projectId); });
+  html += '<div class="tiles">' + tile('Total paid', money2(sum(costs, amt)), '', 'is-forest') + tile('Entries', String(costs.length)) + tile('Projects', String(pids.length)) + '</div>';
+  if (v.notes) html += '<div class="card"><p class="body-2" style="margin:0">' + esc(v.notes) + '</p></div>';
+  if (!costs.length) return html + emptyState('users', 'No costs for this vendor', 'Entries appear here as soon as you log a cost with this vendor.');
+  pids.forEach(function (pid) {
+    var p = project(pid), list = costs.filter(function (x) { return x.projectId === pid; }).sort(function (a, b) { return a.date < b.date ? 1 : -1; });
+    html += '<div class="card list"><div class="card-head"><h2 class="title">' + esc(p ? p.name : 'Deleted project') + '</h2><span class="label">' + money2(sum(list, amt)) + '</span></div>';
+    list.forEach(function (x) {
+      var li = lineItem(x.lineItemId);
+      html += '<div class="mini-row" style="cursor:pointer" data-act="edit-cost" data-id="' + x.id + '"><div class="grow"><div class="name">' + esc(li ? li.name : 'Removed line') + '</div><div class="what">' +
+        esc(fmtDate(x.date) + (x.note ? ' · ' + x.note : '')) + '</div></div><span class="num">' + money2(x.amount) + '</span></div>';
+    });
+    html += '</div>';
+  });
+  return html;
+}
+
+function templateRows(type) {
+  return S.data.templates.filter(function (t) { return t.type === type && t.active; }).sort(function (a, b) { return a.categoryOrder - b.categoryOrder || a.lineOrder - b.lineOrder; });
+}
+function viewSettings() {
+  var type = S.ui.tplType, rows = templateRows(type), cats = [];
+  rows.forEach(function (t) { if (cats.indexOf(t.category) < 0) cats.push(t.category); });
+  var html = head('', 'Settings');
+  html += '<div class="card"><div class="card-head"><h2 class="title">Templates</h2><span class="label">' + (rows.length ? cats.length + ' categories · ' + rows.length + ' line items' : 'Not loaded yet') + '</span></div>' +
+    '<p class="body-2" style="margin:14px 0">A new project copies its line items from the template for its type. Changes here affect new projects only.</p>' +
+    '<div class="segmented">' + ['Residential', 'Commercial'].map(function (t) { return '<button class="seg' + (type === t ? ' is-on' : '') + '" data-act="tpl-type" data-type="' + t + '">' + t + '</button>'; }).join('') + '</div>';
+  if (!rows.length) html += '<p class="body-2">No ' + type.toLowerCase() + ' template yet. Paste its categories and line items below to load it.</p>';
+  cats.forEach(function (cat) {
+    html += '<details class="collapsible"><summary class="tpl-cat">' + esc(cat) + ' <span class="muted" style="font-weight:400">' + rows.filter(function (t) { return t.category === cat; }).length + '</span></summary>';
+    rows.filter(function (t) { return t.category === cat; }).forEach(function (t) {
+      html += '<div class="tpl-line"><span class="grow">' + esc(t.lineItem) + '</span>' + (t.fee ? '<span class="tag tag-good" style="margin:0">Fee</span>' : '') + (t.excludeProgress ? '<span class="tag tag-neutral" style="margin:0">Not in % complete</span>' : '') +
+        '<button class="x-btn" data-act="tpl-remove" data-id="' + t.id + '" aria-label="Remove ' + esc(t.lineItem) + '">' + icon('x') + '</button></div>';
+    });
+    html += '</details>';
+  });
+  html += '<div class="form-section"><div class="field"><label class="label" for="tplPaste">Add lines to the ' + type.toLowerCase() + ' template</label>' +
+    '<textarea class="in" id="tplPaste" placeholder="One line item per row, as: Category, Line item&#10;Sitework, Erosion control&#10;Sitework, Paving"></textarea>' +
+    '<div class="hint">Paste straight from a spreadsheet (two columns) or type a comma between category and line item. Existing lines are kept.</div></div>' +
+    '<button class="btn btn-secondary btn-sm" data-act="tpl-import">Add lines</button></div></div>';
+
+  var m = S.data.meta || {};
+  html += '<div class="card"><div class="card-head"><h2 class="title">Data</h2></div>' +
+    '<div class="mini-row"><div class="grow"><div class="name">Google Sheet</div><div class="what">All data lives in this Sheet. You can open, filter and edit it directly.</div></div><a class="btn btn-secondary btn-sm" href="' + esc(S.data.sheetUrl) + '" target="_blank" rel="noopener">Open the Sheet</a></div>' +
+    '<div class="mini-row"><div class="grow"><div class="name">Export every cost entry</div><div class="what">One CSV across all projects.</div></div><button class="btn btn-secondary btn-sm" data-act="export-all">' + icon('download') + 'Export CSV</button></div>' +
+    '<div class="mini-row"><div class="grow"><div class="name">Weekly backup</div><div class="what">' + (m.backupOn ? 'On. ' + (m.lastBackup ? 'Last backup ' + fmtDate(m.lastBackup) + '.' : 'The first copy is made within a week.') + ' Copies go to the "Job Cost Tracker Backups" folder in Drive; the last 8 are kept.' : 'Off. Turn it on to copy the Sheet to a Drive folder every week.') +
+    '</div></div>' + (m.backupOn ? '' : '<button class="btn btn-secondary btn-sm" data-act="backup-on">Turn on</button>') + '</div>' +
+    '<div class="mini-row"><div class="grow"><div class="name">Demo project</div><div class="what">Adds the sample residential job with a budget and example costs.</div></div><button class="btn btn-secondary btn-sm" data-act="load-demo">Load demo</button></div></div>';
+  return html + '<p class="footnote">Job Cost Tracker ' + esc(S.data.version) + '</p>';
+}
+
+/* =====================================================================
+   10. Dialogs
+   ===================================================================== */
+function openDialog(d) {
+  S.dialog = d;
+  var b = DIALOGS[d.type](d);
+  $('#dialogHost').innerHTML = '<div class="sheet-backdrop" data-act="close-dialog"></div><form class="sheet' + (b.wide ? ' is-wide' : '') + '" id="dlg" novalidate autocomplete="off">' +
+    '<div class="sheet-grab"></div><div class="sheet-head"><h2 class="title">' + esc(b.title) + '</h2><button type="button" class="icon-btn" data-act="close-dialog" aria-label="Close">' + icon('x') + '</button></div>' +
+    '<div class="sheet-body"><div class="form-error" id="dlgError" hidden></div>' + b.body + '</div><div class="sheet-foot">' + b.foot + '</div></form>';
+  var first = $('#dlg [autofocus]') || $('#dlg input:not([type=hidden]), #dlg select, #dlg textarea');
+  if (first) { first.focus(); if (first.select && first.type !== 'date') first.select(); }
+}
+function closeDialog() { S.dialog = null; $('#dialogHost').innerHTML = ''; }
+function dlgError(html) { var e = $('#dlgError'); e.innerHTML = html; e.hidden = false; $('#dlg .sheet-body').scrollTop = 0; }
+function field(label, input, hint) { return '<div class="field"><label class="label">' + label + '</label>' + input + (hint ? '<div class="hint">' + hint + '</div>' : '') + '</div>'; }
+function inp(id, value, attrs) { return '<input class="in" id="' + id + '" value="' + esc(value === undefined || value === null ? '' : value) + '" ' + (attrs || '') + '>'; }
+function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+function checked(id) { var el = document.getElementById(id); return !!(el && el.checked); }
+function sw(id, on, label) { return '<label class="switch-row"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '><span class="switch"></span>' + label + '</label>'; }
+function choices(name, opts, value) {
+  return '<div class="choices" data-choices="' + name + '">' + opts.map(function (o) {
+    return '<label class="choice' + (o.value === value ? ' is-on' : '') + (o.disabled ? ' is-disabled' : '') + '"><input type="radio" name="' + name + '" value="' + esc(o.value) + '"' + (o.value === value ? ' checked' : '') + (o.disabled ? ' disabled' : '') +
+      '><span class="dot"></span><span>' + esc(o.label) + (o.note ? '<br><span class="body-2">' + esc(o.note) + '</span>' : '') + '</span></label>';
+  }).join('') + '</div>';
+}
+function radio(name) { var el = $('#dlg input[name="' + name + '"]:checked'); return el ? el.value : ''; }
+function lineOptions(pid, selected) {
+  var c = calc(pid), html = '<option value="">No line item</option>', cat = null;
+  c.rows.slice().sort(function (a, b) { return a.li.categoryOrder - b.li.categoryOrder || a.li.lineOrder - b.li.lineOrder; }).forEach(function (r) {
+    if (r.li.category !== cat) { html += (cat === null ? '' : '</optgroup>') + '<optgroup label="' + esc(r.li.category) + '">'; cat = r.li.category; }
+    html += '<option value="' + r.li.id + '"' + (selected === r.li.id ? ' selected' : '') + '>' + esc(r.li.name) + '</option>';
+  });
+  return html + (cat === null ? '' : '</optgroup>');
+}
+
+var DIALOGS = {
+  cost: function (d) {
+    var x = d.cost, li = x ? lineItem(x.lineItemId) : d.lineId ? lineItem(d.lineId) : null;
+    var open = S.data.projects.filter(function (p) { return !p.archived; }).sort(by('name'));
+    var body = (x ? '' : field('Project', '<select id="cProject" data-change="cost-project">' + open.map(function (p) { return '<option value="' + p.id + '"' + (p.id === d.projectId ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join('') + '</select>')) +
+      field('Line item', '<div class="ta" data-ta="line"><input class="in" id="cLine" placeholder="Start typing, e.g. lumber" value="' + esc(li ? li.name : '') + '" data-id="' + (li ? li.id : '') + '"' + (li ? '' : ' autofocus') + '><div class="ta-list" hidden></div></div>') +
+      '<div class="inline">' + field('Amount', inp('cAmount', x ? num(x.amount, 2).replace(/,/g, '') : '', 'inputmode="decimal" placeholder="0.00"' + (li && !x ? ' autofocus' : '')), x && x.amount < 0 ? '' : 'Use a minus sign for a credit.') +
+      field('Date', inp('cDate', x ? x.date : (d.date || S.data.today), 'type="date"')) + '</div>' +
+      field('Vendor', '<div class="ta" data-ta="vendor"><input class="in" id="cVendor" placeholder="Who was paid" value="' + esc(x ? vendorName(x.vendorId) : (d.vendorName || '')) + '"><div class="ta-list" hidden></div></div>') +
+      field('Note <span class="muted">(optional)</span>', inp('cNote', x ? x.note : '', 'placeholder="Invoice number or description"'));
+    return { title: x ? 'Edit cost' : 'Add cost', body: body,
+      foot: x ? '<button type="button" class="btn btn-destructive" data-act="delete-cost">Delete</button><button class="btn btn-primary" type="submit">Save</button>'
+        : '<button type="button" class="btn btn-secondary" data-act="save-another">Save and add another</button><button class="btn btn-primary" type="submit">Save</button>' };
+  },
+  project: function (d) {
+    var p = d.project, types = templateTypes();
+    var body = field('Project name', inp('pName', p ? p.name : '', 'placeholder="e.g. Lot 14, Canyon Ridge" autofocus')) +
+      (p ? '' : field('Type', choices('pType', [
+        { value: 'Residential', label: 'Residential', note: types.Residential + ' line items', disabled: !types.Residential },
+        { value: 'Commercial', label: 'Commercial', note: types.Commercial ? types.Commercial + ' line items' : 'Template not loaded yet', disabled: !types.Commercial }
+      ], types.Residential ? 'Residential' : 'Commercial'))) +
+      '<div class="inline">' + field('Client', inp('pClient', p ? p.client : '')) + field('Location', inp('pLocation', p ? p.location : '')) + '</div>' +
+      '<div class="inline">' + field('Start date', inp('pStart', p ? p.startDate : '', 'type="date"')) + field('Target finish', inp('pEnd', p ? p.endDate : '', 'type="date"')) + '</div>';
+    if (p) {
+      body += '<div class="inline">' + field('Status', '<select id="pStatus">' + ['Planning', 'Active', 'Closed'].map(function (s) { return '<option' + (p.status === s ? ' selected' : '') + '>' + s + '</option>'; }).join('') + '</select>') +
+        (p.budgetFinal ? field('Original contract price', inp('pContract', p.originalContract === '' ? '' : p.originalContract, 'inputmode="decimal"'), 'Set to budget including fee when the budget was finalized.') : '') + '</div>';
+    }
+    body += field('Notes <span class="muted">(optional)</span>', '<textarea class="in" id="pNotes">' + esc(p ? p.notes : '') + '</textarea>');
+    return { title: p ? 'Edit project' : 'New project', body: body,
+      foot: (p ? '<button type="button" class="btn btn-destructive" data-act="archive-project">' + (p.archived ? 'Restore' : 'Archive') + '</button>' : '<button type="button" class="btn btn-secondary" data-act="close-dialog">Cancel</button>') +
+        '<button class="btn btn-primary" type="submit">' + (p ? 'Save' : 'Create project') + '</button>' };
+  },
+  line: function (d) {
+    var li = d.line, p = project(d.projectId), c = calc(d.projectId), cats = [];
+    c.rows.forEach(function (r) { if (cats.indexOf(r.li.category) < 0) cats.push(r.li.category); });
+    var body = field('Name', inp('lName', li ? li.name : '', 'autofocus')) +
+      field('Category', inp('lCategory', li ? li.category : (d.category || ''), 'list="catList" placeholder="Pick one or type a new category"') + '<datalist id="catList">' + cats.map(function (k) { return '<option value="' + esc(k) + '">'; }).join('') + '</datalist>') +
+      (p.budgetFinal ? '<p class="field-hint" style="margin-top:0">The budget is finalized. ' + (li ? 'Change this line’s budget with a change order.' : 'New lines start at $0; give them a budget with a change order.') + '</p>'
+        : field('Budget', inp('lBudget', li && li.originalBudget ? li.originalBudget : '', 'inputmode="decimal" placeholder="0"'))) +
+      field('Expected final cost <span class="muted">(optional)</span>', inp('lForecast', li ? li.forecastOverride : '', 'inputmode="decimal"'), 'Leave blank to forecast from the budget. Set it when you know a line will land somewhere else.') +
+      '<div class="field">' + sw('lFee', li && li.fee, 'This is my contractor fee, not a cost') + sw('lExclude', li && li.excludeProgress, 'Leave out of percent complete (e.g. land)') + '</div>' +
+      field('Notes <span class="muted">(optional)</span>', '<textarea class="in" id="lNotes">' + esc(li ? li.notes : '') + '</textarea>');
+    return { title: li ? 'Edit line item' : 'Add line item', body: body,
+      foot: (li ? '<button type="button" class="btn btn-destructive" data-act="hide-line">Remove</button>' : '<button type="button" class="btn btn-secondary" data-act="close-dialog">Cancel</button>') + '<button class="btn btn-primary" type="submit">Save</button>' };
+  },
+  co: function (d) {
+    var o = d.co, c = calc(d.projectId), next = 1;
+    c.cos.forEach(function (x) { var n = parseInt(x.number, 10); if (n >= next) next = n + 1; });
+    var body = '<div class="inline"><div class="narrow">' + field('No.', inp('oNumber', o ? o.number : next)) + '</div>' + field('Date', inp('oDate', o ? o.date : S.data.today, 'type="date"')) + '</div>' +
+      field('Description', inp('oDesc', o ? o.description : '', 'placeholder="e.g. Add covered patio" autofocus')) +
+      field('Line item', '<select id="oLine">' + lineOptions(d.projectId, o ? o.lineItemId : (d.lineId || '')) + '</select>', 'The budget line this change applies to. For a transfer between lines, save two rows with the same number.') +
+      '<div class="inline">' + field('Budget change', inp('oBudget', o && o.budgetChange ? o.budgetChange : '', 'inputmode="decimal" placeholder="0"'), 'Cost added to or removed from the line.') +
+      field('Contract change', inp('oContract', o && o.contractChange ? o.contractChange : '', 'inputmode="decimal" placeholder="0"'), 'Change to what the client pays.') + '</div>' +
+      field('Status', choices('oStatus', [{ value: 'Approved', label: 'Approved', note: 'Counts in the revised budget and contract price' }, { value: 'Pending', label: 'Pending', note: 'Shown separately until it is approved' }], o ? o.status : 'Approved'));
+    return { title: o ? 'Edit change order' : 'New change order', body: body,
+      foot: (o ? '<button type="button" class="btn btn-destructive" data-act="delete-co">Delete</button>' : '<button type="button" class="btn btn-secondary" data-act="close-dialog">Cancel</button>') + '<button class="btn btn-primary" type="submit">Save</button>' };
+  },
+  vendor: function (d) {
+    var v = d.vendor;
+    return { title: v ? 'Edit vendor' : 'New vendor',
+      body: field('Name', inp('vName', v ? v.name : '', 'autofocus')) + field('Trade', inp('vTrade', v ? v.trade : '', 'placeholder="e.g. Plumbing"')) +
+        '<div class="inline">' + field('Phone', inp('vPhone', v ? v.phone : '', 'type="tel"')) + field('Email', inp('vEmail', v ? v.email : '', 'type="email"')) + '</div>' +
+        field('Notes <span class="muted">(optional)</span>', '<textarea class="in" id="vNotes">' + esc(v ? v.notes : '') + '</textarea>'),
+      foot: '<button type="button" class="btn btn-secondary" data-act="close-dialog">Cancel</button><button class="btn btn-primary" type="submit">Save</button>' };
+  },
+  merge: function (d) {
+    var v = vendor(d.id), others = S.data.vendors.filter(function (o) { return o.id !== d.id && !o.archived; }).sort(by('name'));
+    return { title: 'Merge vendor',
+      body: '<p class="confirm-text">Move every cost entry from <strong>' + esc(v.name) + '</strong> to another vendor, then remove ' + esc(v.name) + '. Use this to clean up duplicates.</p>' +
+        field('Merge into', '<select id="mInto"><option value="">Choose a vendor</option>' + others.map(function (o) { return '<option value="' + o.id + '">' + esc(o.name) + '</option>'; }).join('') + '</select>'),
+      foot: '<button type="button" class="btn btn-secondary" data-act="close-dialog">Cancel</button><button class="btn btn-primary" type="submit">Merge</button>' };
+  },
+  confirm: function (d) {
+    return { title: d.title, body: '<p class="confirm-text">' + d.text + '</p>',
+      foot: '<button type="button" class="btn btn-secondary" data-act="close-dialog">Cancel</button><button class="btn btn-primary" type="submit" autofocus>' + esc(d.ok) + '</button>' };
+  }
+};
+
+/* ---------- saving each dialog ---------- */
+function resolveLine(input, pid) {
+  if (input.dataset.id && lineItem(input.dataset.id)) return input.dataset.id;
+  var q = input.value.trim().toLowerCase();
+  if (!q) return '';
+  var opts = taOptions('line', pid), exact = opts.filter(function (o) { return o.label.toLowerCase() === q; });
+  if (exact.length === 1) return exact[0].id;
+  var hits = taFilter(opts, q);
+  return hits.length === 1 ? hits[0].id : '';
+}
+function vendorOps(name) {
+  var found = S.data.vendors.filter(function (v) { return v.name.trim().toLowerCase() === name.toLowerCase(); })[0];
+  if (found) return { id: found.id, ops: found.archived ? [up('Vendors', { id: found.id, archived: false })] : [] };
+  var v = { id: uid(), name: name, trade: '', phone: '', email: '', notes: '', archived: false };
+  return { id: v.id, ops: [up('Vendors', v)] };
+}
+function buildCost(o) {
+  // o: {projectId, lineItemId, amountText, vendorName, date, note, existing, force}
+  var amount = parseAmount(o.amountText);
+  if (!o.lineItemId) return { error: 'Choose a line item from the list.' };
+  if (isNaN(amount) || amount === 0) return { error: 'Enter an amount, such as 1250.00.' };
+  if (!o.vendorName) return { error: 'Enter the vendor who was paid.' };
+  if (!isDate(o.date)) return { error: 'Enter a valid date.' };
+  var v = vendorOps(o.vendorName);
+  if (!o.force && S.data.costs.some(function (x) {
+    return x.lineItemId === o.lineItemId && x.vendorId === v.id && x.amount === amount && x.date === o.date && (!o.existing || x.id !== o.existing.id);
+  })) {
+    return { error: 'This looks like a duplicate: the same vendor, amount and date are already on this line. <button type="button" class="btn-text" data-act="force-save">Save anyway</button>' };
+  }
+  var cost = { id: o.existing ? o.existing.id : uid(), projectId: o.projectId, lineItemId: o.lineItemId, vendorId: v.id, amount: amount, date: o.date,
+    note: o.note || '', created: o.existing ? o.existing.created : new Date().toISOString(), deleted: false };
+  return { cost: cost, ops: v.ops.concat([up('Costs', cost)]) };
+}
+var SAVE = {
+  cost: function (d, opts) {
+    var x = d.cost, pid = x ? x.projectId : val('cProject') || d.projectId;
+    var res = buildCost({ projectId: pid, lineItemId: resolveLine($('#cLine'), pid), amountText: val('cAmount'), vendorName: val('cVendor'), date: val('cDate'), note: val('cNote'), existing: x, force: opts.force });
+    if (res.error) return dlgError(res.error);
+    var another = opts.another, keep = { type: 'cost', projectId: pid, vendorName: val('cVendor'), date: val('cDate') };
+    closeDialog();
+    mutate(res.ops, x ? 'Cost updated' : 'Cost added · ' + money2(res.cost.amount), x ? null : [up('Costs', { id: res.cost.id, deleted: true })]);
+    if (another) openDialog(keep);
+  },
+  project: function (d) {
+    var p = d.project, name = val('pName');
+    if (!name) return dlgError('Give the project a name.');
+    var start = val('pStart'), end = val('pEnd');
+    if (p) {
+      var patch = { id: p.id, name: name, client: val('pClient'), location: val('pLocation'), startDate: start, endDate: end, status: val('pStatus'), notes: val('pNotes') };
+      if ($('#pContract')) {
+        var ct = val('pContract');
+        if (ct !== '' && isNaN(parseAmount(ct))) return dlgError('Enter the contract price as a number.');
+        patch.originalContract = ct === '' ? '' : parseAmount(ct);
+      }
+      closeDialog();
+      return mutate([up('Projects', patch)], 'Project saved');
+    }
+    var type = radio('pType');
+    var tpl = templateRows(type);
+    if (!tpl.length) return dlgError('There is no ' + type.toLowerCase() + ' template yet. Load it under Settings first.');
+    var np = { id: uid(), name: name, type: type, status: 'Planning', client: val('pClient'), location: val('pLocation'), startDate: start, endDate: end,
+      originalContract: '', budgetFinal: false, notes: val('pNotes'), created: S.data.today, archived: false };
+    var ops = [up('Projects', np)];
+    tpl.forEach(function (t) {
+      ops.push(up('LineItems', { id: uid(), projectId: np.id, category: t.category, categoryOrder: t.categoryOrder, name: t.lineItem, lineOrder: t.lineOrder,
+        originalBudget: 0, forecastOverride: '', fee: t.fee, excludeProgress: t.excludeProgress, done: false, doneDate: '', hidden: false, notes: '' }));
+    });
+    closeDialog();
+    mutate(ops, 'Project created');
+    go('p/' + np.id + '/budget');
+  },
+  line: function (d) {
+    var li = d.line, p = project(d.projectId), name = val('lName'), cat = val('lCategory');
+    if (!name) return dlgError('Give the line item a name.');
+    if (!cat) return dlgError('Choose or type a category.');
+    var fc = val('lForecast'), bd = $('#lBudget') ? val('lBudget') : null;
+    if (fc !== '' && isNaN(parseAmount(fc))) return dlgError('Enter the expected final cost as a number, or leave it blank.');
+    if (bd !== null && bd !== '' && isNaN(parseAmount(bd))) return dlgError('Enter the budget as a number.');
+    var lines = S.data.lineItems.filter(function (l) { return l.projectId === p.id; });
+    var same = lines.filter(function (l) { return l.category === cat; });
+    var obj = { id: li ? li.id : uid(), name: name, category: cat, forecastOverride: fc === '' ? '' : parseAmount(fc), fee: checked('lFee'), excludeProgress: checked('lExclude'), notes: val('lNotes') };
+    if (bd !== null) obj.originalBudget = bd === '' ? 0 : parseAmount(bd);
+    if (!li || li.category !== cat) {
+      obj.categoryOrder = same.length ? same[0].categoryOrder : lines.reduce(function (m, l) { return Math.max(m, l.categoryOrder); }, 0) + 1;
+      obj.lineOrder = same.reduce(function (m, l) { return Math.max(m, l.lineOrder); }, 0) + 1;
+    }
+    if (!li) {
+      obj.projectId = p.id; obj.done = false; obj.doneDate = ''; obj.hidden = false;
+      if (obj.originalBudget === undefined) obj.originalBudget = 0;
+    }
+    closeDialog();
+    if (!li) S.ui.hideEmpty[p.id] = false;
+    mutate([up('LineItems', obj)], li ? 'Line item saved' : 'Line item added');
+  },
+  co: function (d) {
+    var o = d.co, desc = val('oDesc'), b = val('oBudget'), ct = val('oContract'), line = val('oLine'), date = val('oDate');
+    var bn = b === '' ? 0 : parseAmount(b), cn = ct === '' ? 0 : parseAmount(ct);
+    if (!desc) return dlgError('Describe the change.');
+    if (!isDate(date)) return dlgError('Enter a valid date.');
+    if (isNaN(bn) || isNaN(cn)) return dlgError('Enter the changes as numbers. Use a minus sign for a reduction.');
+    if (!bn && !cn) return dlgError('Enter a budget change, a contract change, or both.');
+    if (bn && !line) return dlgError('Choose the line item this budget change applies to.');
+    var obj = { id: o ? o.id : uid(), projectId: d.projectId, number: val('oNumber'), date: date, description: desc, lineItemId: line, budgetChange: bn, contractChange: cn, status: radio('oStatus') || 'Approved' };
+    closeDialog();
+    mutate([up('ChangeOrders', obj)], o ? 'Change order saved' : 'Change order added');
+  },
+  vendor: function (d) {
+    var v = d.vendor, name = val('vName');
+    if (!name) return dlgError('Give the vendor a name.');
+    if (S.data.vendors.some(function (o) { return !o.archived && o.name.trim().toLowerCase() === name.toLowerCase() && (!v || o.id !== v.id); })) return dlgError('A vendor with this name already exists.');
+    var obj = { id: v ? v.id : uid(), name: name, trade: val('vTrade'), phone: val('vPhone'), email: val('vEmail'), notes: val('vNotes'), archived: false };
+    closeDialog();
+    mutate([up('Vendors', obj)], v ? 'Vendor saved' : 'Vendor added');
+  },
+  merge: function (d) {
+    var into = val('mInto');
+    if (!into) return dlgError('Choose the vendor to merge into.');
+    var ops = S.data.costs.filter(function (x) { return x.vendorId === d.id; }).map(function (x) { return up('Costs', { id: x.id, vendorId: into }); });
+    ops.push(up('Vendors', { id: d.id, archived: true }));
+    closeDialog();
+    go('v/' + into, true);
+    mutate(ops, 'Vendors merged');
+  },
+  confirm: function (d) { closeDialog(); d.run(); }
+};
+
+/* =====================================================================
+   11. Type-ahead (line item and vendor fields)
+   ===================================================================== */
+function taOptions(kind, pid) {
+  if (kind === 'vendor') {
+    return S.data.vendors.filter(function (v) { return !v.archived; }).sort(by('name')).map(function (v) { return { id: v.id, label: v.name, sub: v.trade }; });
+  }
+  if (!pid || !project(pid)) return [];
+  return calc(pid).rows.map(function (r) { return { id: r.li.id, label: r.li.name, sub: r.li.category + (r.li.fee ? ' · Contractor fee' : '') }; });
+}
+function taFilter(opts, q) {
+  var tokens = q.toLowerCase().split(/\s+/).filter(Boolean);
+  var ql = q.trim().toLowerCase();
+  // Best matches first: exact name, name starts with, name contains, then category matches.
+  function rank(o) {
+    var l = o.label.toLowerCase();
+    return l === ql ? 0 : l.indexOf(ql) === 0 ? 1 : l.indexOf(ql) > 0 ? 2 : 3;
+  }
+  return opts.map(function (o, i) { return { o: o, i: i, r: ql ? rank(o) : 0 }; }).filter(function (x) {
+    var hay = (x.o.label + ' ' + x.o.sub).toLowerCase();
+    return tokens.every(function (t) { return hay.indexOf(t) >= 0; });
+  }).sort(function (a, b) { return a.r - b.r || a.i - b.i; }).map(function (x) { return x.o; });
+}
+function taPid() {
+  var d = S.dialog;
+  if (d && d.type === 'cost') return d.cost ? d.cost.projectId : (val('cProject') || d.projectId);
+  return S.route.id;
+}
+function taShow(ta) {
+  var input = $('input', ta), list = $('.ta-list', ta), kind = ta.getAttribute('data-ta'), q = input.value.trim();
+  var opts = taFilter(taOptions(kind, taPid()), q).slice(0, 50);
+  var html = opts.map(function (o, i) {
+    return '<div class="ta-opt' + (i === 0 && q ? ' is-active' : '') + '" data-id="' + o.id + '" data-label="' + esc(o.label) + '">' + esc(o.label) + (o.sub ? '<small>' + esc(o.sub) + '</small>' : '') + '</div>';
+  }).join('');
+  if (kind === 'vendor' && q && !opts.some(function (o) { return o.label.toLowerCase() === q.toLowerCase(); })) {
+    html += '<div class="ta-opt is-new' + (opts.length ? '' : ' is-active') + '" data-new="1">Add “' + esc(q) + '” as a new vendor</div>';
+  }
+  if (kind === 'line' && !opts.length) html = '<div class="ta-opt" style="cursor:default;color:var(--text-2)">No line items match</div>';
+  list.innerHTML = html;
+  list.hidden = !html;
+}
+function taHide(ta) { var l = $('.ta-list', ta); if (l) l.hidden = true; }
+function taChoose(ta, opt) {
+  var input = $('input', ta);
+  if (opt.getAttribute('data-id')) {
+    input.value = opt.getAttribute('data-label');
+    input.dataset.id = opt.getAttribute('data-id');
+  }
+  taHide(ta);
+  if (input.id === 'cLine') { var a = $('#cAmount'); if (a && !a.value) a.focus(); }
+}
+
+/* =====================================================================
+   12. Actions
+   ===================================================================== */
+function download(name, rows) {
+  var csv = rows.map(function (r) {
+    return r.map(function (v) {
+      if (typeof v === 'number') return String(v);
+      var s = String(v === null || v === undefined ? '' : v);
+      if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+      return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }).join(',');
+  }).join('\r\n');
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = name.replace(/[^\w.-]+/g, '-');
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+function currentProjectId() {
+  if (S.route.view === 'project') return S.route.id;
+  var list = activeProjects();
+  return list.length ? list[0].id : (S.data.projects.filter(function (p) { return !p.archived; })[0] || {}).id;
+}
+function busy(text, promise) {
+  toast(text);
+  return promise.then(null, function (e) { toast('That did not work: ' + errText(e)); });
+}
+
+var ACT = {
+  'add-cost': function () {
+    var pid = currentProjectId();
+    if (!pid) return;
+    openDialog({ type: 'cost', projectId: pid, lineId: S.panel ? S.panel.lineId : null });
+  },
+  'new-project': function () { openDialog({ type: 'project' }); },
+  'edit-project': function () { openDialog({ type: 'project', project: project(S.route.id) }); },
+  'archive-project': function () {
+    var p = S.dialog.project;
+    closeDialog();
+    mutate([up('Projects', { id: p.id, archived: !p.archived })], p.archived ? 'Project restored' : 'Project archived', [up('Projects', { id: p.id, archived: p.archived })]);
+    if (!p.archived) go('projects');
+  },
+  'load-demo': function () {
+    busy('Loading the demo project…', server('apiLoadDemo').then(function (json) {
+      setData(json);
+      var demo = S.data.projects.filter(function (p) { return /^demo_/.test(p.id); }).sort(by('id')).pop();
+      go(demo ? 'p/' + demo.id + '/dashboard' : 'overview');
+    }));
+  },
+  'backup-on': function () {
+    busy('Turning on weekly backups…', server('apiInstallBackup').then(function (json) { setData(json); render(); toast('Weekly backup is on'); }));
+  },
+  'proj-type': function (el) { S.ui.projType = el.getAttribute('data-type'); render(); },
+  'open-cat': function (el) {
+    var cat = el.getAttribute('data-cat');
+    S.ui.collapsed[S.route.id + '|' + cat] = false;
+    S.ui.focusCat = cat;
+    go('p/' + S.route.id + '/budget');
+  },
+  'open-line': function (el) {
+    if (S.route.tab !== 'budget') { S.route.tab = 'budget'; try { if (gs && gs.history) gs.history.push(null, null, 'p/' + S.route.id + '/budget'); } catch (e) { /* optional */ } }
+    S.panel = { lineId: el.getAttribute('data-id'), group: false };
+    render();
+  },
+  'close-panel': function () { S.panel = null; renderPanel(); },
+  'toggle-group': function () { S.panel.group = !S.panel.group; renderPanel(); fillIcons(); },
+  'toggle-cat': function (el) {
+    var k = S.route.id + '|' + el.getAttribute('data-cat');
+    S.ui.collapsed[k] = !S.ui.collapsed[k];
+    render();
+  },
+  'toggle-done': function (el) {
+    var li = lineItem(el.getAttribute('data-id'));
+    mutate([up('LineItems', { id: li.id, done: !li.done, doneDate: li.done ? '' : S.data.today })], li.done ? 'Line reopened' : 'Marked done: ' + li.name,
+      [up('LineItems', { id: li.id, done: li.done, doneDate: li.doneDate })]);
+  },
+  'new-line': function () { openDialog({ type: 'line', projectId: S.route.id }); },
+  'edit-line': function (el) { var li = lineItem(el.getAttribute('data-id')); openDialog({ type: 'line', projectId: li.projectId, line: li }); },
+  'hide-line': function () {
+    var li = S.dialog.line;
+    if (S.data.costs.some(function (x) { return x.lineItemId === li.id; })) return dlgError('This line has cost entries. Move or delete them before removing the line.');
+    if (S.data.changeOrders.some(function (o) { return o.lineItemId === li.id; })) return dlgError('This line has change orders. Delete them before removing the line.');
+    closeDialog();
+    S.panel = null;
+    mutate([up('LineItems', { id: li.id, hidden: true })], 'Line item removed', [up('LineItems', { id: li.id, hidden: false })]);
+  },
+  'finalize': function () {
+    var c = calc(S.route.id), p = c.p;
+    if (!c.origTotal) return toast('Enter at least one budget amount first.');
+    openDialog({ type: 'confirm', title: 'Finalize the budget?', ok: 'Finalize budget',
+      text: 'This locks <strong>' + money(c.cost.ob) + '</strong> of cost' + (c.fee.ob ? ' plus your <strong>' + money(c.fee.ob) + '</strong> fee' : '') + ' as the original budget and sets the contract price to <strong>' + money(c.origTotal) +
+        '</strong>. After this, budget changes go through change orders.',
+      run: function () {
+        mutate([up('Projects', { id: p.id, budgetFinal: true, originalContract: c.origTotal, status: p.status === 'Planning' ? 'Active' : p.status })], 'Budget finalized');
+      } });
+  },
+  'unlock': function () {
+    var p = project(S.route.id);
+    openDialog({ type: 'confirm', title: 'Unlock the budget?', ok: 'Unlock',
+      text: 'Original budgets become editable again and the contract price is recalculated when you finalize. Change orders already entered are kept.',
+      run: function () { mutate([up('Projects', { id: p.id, budgetFinal: false, originalContract: '' })], 'Budget unlocked'); } });
+  },
+  'edit-cost': function (el) {
+    var x = byId(S.data.costs, el.getAttribute('data-id'));
+    if (x) openDialog({ type: 'cost', cost: x, projectId: x.projectId });
+  },
+  'delete-cost': function () {
+    var x = S.dialog.cost;
+    closeDialog();
+    mutate([up('Costs', { id: x.id, deleted: true })], 'Cost deleted', [up('Costs', JSON.parse(JSON.stringify(x)))]);
+  },
+  'save-another': function () { SAVE.cost(S.dialog, { another: true }); },
+  'force-save': function () { SAVE.cost(S.dialog, { force: true }); },
+  'new-co': function () { openDialog({ type: 'co', projectId: S.route.id }); },
+  'edit-co': function (el) { var o = byId(S.data.changeOrders, el.getAttribute('data-id')); if (o) openDialog({ type: 'co', projectId: o.projectId, co: o }); },
+  'delete-co': function () {
+    var o = S.dialog.co;
+    closeDialog();
+    mutate([{ op: 'remove', tab: 'ChangeOrders', id: o.id }], 'Change order deleted', [up('ChangeOrders', JSON.parse(JSON.stringify(o)))]);
+  },
+  'clear-ledger': function () { var f = S.ui.ledger; f.q = f.cat = f.vendor = f.from = f.to = ''; render(); },
+  'new-vendor': function () { openDialog({ type: 'vendor' }); },
+  'edit-vendor': function (el) { openDialog({ type: 'vendor', vendor: vendor(el.getAttribute('data-id')) }); },
+  'merge-vendor': function (el) { openDialog({ type: 'merge', id: el.getAttribute('data-id') }); },
+  'tpl-type': function (el) { S.ui.tplType = el.getAttribute('data-type'); render(); },
+  'tpl-remove': function (el) {
+    var id = el.getAttribute('data-id');
+    mutate([up('Templates', { id: id, active: false })], 'Removed from the template', [up('Templates', { id: id, active: true })]);
+  },
+  'tpl-import': function () {
+    var type = S.ui.tplType, rows = templateRows(type), text = $('#tplPaste').value;
+    var catOrder = {}, lineMax = {}, have = {}, maxCat = 0, ops = [], bad = 0;
+    rows.forEach(function (t) {
+      catOrder[t.category.toLowerCase()] = { order: t.categoryOrder, name: t.category };
+      maxCat = Math.max(maxCat, t.categoryOrder);
+      lineMax[t.category.toLowerCase()] = Math.max(lineMax[t.category.toLowerCase()] || 0, t.lineOrder);
+      have[(t.category + '|' + t.lineItem).toLowerCase()] = 1;
+    });
+    text.split(/\r?\n/).forEach(function (raw) {
+      if (!raw.trim()) return;
+      var parts = raw.indexOf('\t') >= 0 ? raw.split('\t') : [raw.slice(0, raw.indexOf(',')), raw.slice(raw.indexOf(',') + 1)];
+      var cat = (parts[0] || '').trim(), line = (parts[1] || '').trim();
+      if (raw.indexOf('\t') < 0 && raw.indexOf(',') < 0 || !cat || !line) { bad++; return; }
+      var key = cat.toLowerCase();
+      if (have[(cat + '|' + line).toLowerCase()]) return;
+      have[(cat + '|' + line).toLowerCase()] = 1;
+      if (!catOrder[key]) catOrder[key] = { order: ++maxCat, name: cat };
+      lineMax[key] = (lineMax[key] || 0) + 1;
+      ops.push(up('Templates', { id: 'tpl_' + uid(), type: type, category: catOrder[key].name, categoryOrder: catOrder[key].order, lineItem: line, lineOrder: lineMax[key], fee: false, excludeProgress: false, active: true }));
+    });
+    if (bad) return toast(bad + (bad === 1 ? ' row needs' : ' rows need') + ' both a category and a line item, separated by a comma.');
+    if (!ops.length) return toast('Nothing new to add.');
+    mutate(ops, ops.length + (ops.length === 1 ? ' line' : ' lines') + ' added to the ' + type.toLowerCase() + ' template');
+  },
+  'export-budget': function () {
+    var c = calc(S.route.id), rows = [['Category', 'Line item', 'Original budget', 'Changes', 'Revised budget', 'Actual', 'Forecast', 'Remaining', 'Variance', 'Status', 'Fee']];
+    c.rows.forEach(function (r) { rows.push([r.li.category, r.li.name, r.ob, r.co, r.rb, r.actual, r.forecast, r.remaining, r.variance, r.status, r.li.fee ? 'yes' : '']); });
+    download(c.p.name + '-budget.csv', rows);
+  },
+  'export-costs': function () {
+    var c = calc(S.route.id), rows = [['Date', 'Category', 'Line item', 'Vendor', 'Note', 'Amount']];
+    ledgerRows(c).forEach(function (x) { rows.push([x.date, x.category, x.line, x.vendor, x.note, x.amount]); });
+    download(c.p.name + '-costs.csv', rows);
+  },
+  'export-all': function () {
+    var rows = [['Project', 'Date', 'Category', 'Line item', 'Vendor', 'Note', 'Amount']];
+    S.data.costs.slice().sort(by('date')).forEach(function (x) {
+      var p = project(x.projectId), li = lineItem(x.lineItemId);
+      rows.push([p ? p.name : '', x.date, li ? li.category : '', li ? li.name : '', vendorName(x.vendorId), x.note, x.amount]);
+    });
+    download('all-costs.csv', rows);
+  },
+  'close-dialog': closeDialog,
+  'retry': function () { $('#main').innerHTML = '<div class="boot"><span class="spin"></span> Loading your projects\u2026</div>'; boot(); }
+};
+
+/* =====================================================================
+   13. Events
+   ===================================================================== */
+document.addEventListener('click', function (e) {
+  var el = e.target.closest('[data-act], [data-go], [data-sort]');
+  if (!el) return;
+  var inner = e.target.closest('input, select, textarea, label, a, button');
+  if (inner && inner !== el && el.contains(inner)) return;
+  if (el.disabled) return;
+  if (el.hasAttribute('data-go')) return go(el.getAttribute('data-go'));
+  if (el.hasAttribute('data-sort')) {
+    var f = S.ui.ledger, k = el.getAttribute('data-sort');
+    if (f.sort === k) f.dir = -f.dir; else { f.sort = k; f.dir = k === 'date' || k === 'amount' ? -1 : 1; }
+    return render();
+  }
+  var fn = ACT[el.getAttribute('data-act')];
+  if (fn) fn(el);
+});
+
+document.addEventListener('submit', function (e) {
+  e.preventDefault();
+  if (e.target.id === 'dlg' && S.dialog) return SAVE[S.dialog.type](S.dialog, {});
+  if (e.target.id === 'quickForm' && S.panel) {
+    var res = buildCost({ projectId: S.route.id, lineItemId: S.panel.lineId, amountText: val('qAmount'), vendorName: val('qVendor'), date: S.data.today, note: '' });
+    if (res.error) return toast(/duplicate/.test(res.error) ? 'That looks like a duplicate of an entry already on this line. Use Add cost to save it anyway.' : res.error);
+    $('#qAmount').value = ''; $('#qVendor').value = '';
+    mutate(res.ops, 'Cost added · ' + money2(res.cost.amount), [up('Costs', { id: res.cost.id, deleted: true })]);
+    var a = $('#qAmount'); if (a) a.focus();
+  }
+});
+
+document.addEventListener('input', function (e) {
+  var t = e.target;
+  var ta = t.closest('.ta');
+  if (ta) { t.dataset.id = ''; return taShow(ta); }
+  if (t.hasAttribute('data-ledger')) { S.ui.ledger[t.getAttribute('data-ledger')] = t.value; return render(); }
+  if (t.hasAttribute('data-vendor-q')) { S.ui.vendorQ = t.value; return render(); }
+});
+
+document.addEventListener('change', function (e) {
+  var t = e.target;
+  if (t.hasAttribute('data-budget')) {
+    var li = lineItem(t.getAttribute('data-budget')), v = t.value.trim(), n = v === '' ? 0 : parseAmount(v);
+    if (isNaN(n) || n < 0) { toast('Enter the budget as a positive number.'); return render(); }
+    if (li && n !== li.originalBudget) mutate([up('LineItems', { id: li.id, originalBudget: n })]);
+    return;
+  }
+  var ch = t.getAttribute('data-change');
+  if (ch === 'show-archived') { S.ui.showArchived = t.checked; return render(); }
+  if (ch === 'hide-empty') { S.ui.hideEmpty[S.route.id] = t.checked; return render(); }
+  if (ch === 'cost-project') { var l = $('#cLine'); l.value = ''; l.dataset.id = ''; return; }
+  if (t.type === 'radio' && t.closest('.choices')) {
+    $all('.choice', t.closest('.choices')).forEach(function (c) { c.classList.toggle('is-on', $('input', c).checked); });
+  }
+});
+
+document.addEventListener('focusin', function (e) {
+  var ta = e.target.closest && e.target.closest('.ta');
+  if (ta && e.target.tagName === 'INPUT') taShow(ta);
+  if (e.target.classList && e.target.classList.contains('cell-in')) e.target.select();
+});
+document.addEventListener('focusout', function (e) {
+  var ta = e.target.closest && e.target.closest('.ta');
+  if (ta) setTimeout(function () { if (!ta.contains(document.activeElement)) taHide(ta); }, 120);
+});
+document.addEventListener('mousedown', function (e) {
+  var opt = e.target.closest('.ta-opt');
+  if (!opt) return;
+  e.preventDefault();
+  taChoose(opt.closest('.ta'), opt);
+});
+
+document.addEventListener('keydown', function (e) {
+  var t = e.target, ta = t.closest && t.closest('.ta');
+  if (ta) {
+    var list = $('.ta-list', ta), opts = $all('.ta-opt[data-id], .ta-opt[data-new]', list), cur = $('.ta-opt.is-active', list), i = opts.indexOf(cur);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (list.hidden) return taShow(ta);
+      if (!opts.length) return;
+      var n = e.key === 'ArrowDown' ? Math.min(i + 1, opts.length - 1) : Math.max(i - 1, 0);
+      if (cur) cur.classList.remove('is-active');
+      opts[n].classList.add('is-active');
+      opts[n].scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (e.key === 'Enter' && !list.hidden && cur) {
+      // Enter picks the highlighted match. If the text already says exactly that (or is a new vendor), it also submits.
+      var same = cur.getAttribute('data-new') || (cur.getAttribute('data-label') || '').toLowerCase() === t.value.trim().toLowerCase();
+      if (!same) e.preventDefault();
+      return taChoose(ta, cur);
+    }
+    if (e.key === 'Escape' && !list.hidden) { e.stopPropagation(); return taHide(ta); }
+    if (e.key === 'Tab' && !list.hidden && cur && cur.getAttribute('data-id') && t.value.trim()) taChoose(ta, cur);
+  }
+  if (t.classList && t.classList.contains('cell-in') && e.key === 'Enter') {
+    e.preventDefault();
+    var cells = $all('.cell-in'), next = cells[cells.indexOf(t) + 1];
+    if (next) next.focus(); else t.blur();
+    return;
+  }
+  if (e.key === 'Escape') {
+    if (S.dialog) return closeDialog();
+    if (S.panel) return ACT['close-panel']();
+    return;
+  }
+  if (e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || S.dialog) return;
+  if (e.key === 'n' || e.key === 'N') { if (!$('#fab').hidden) { e.preventDefault(); ACT['add-cost'](); } }
+  else if (e.key === '/') { var q = $('#q'); if (q) { e.preventDefault(); q.focus(); } }
+});
+
+/* =====================================================================
+   14. Start
+   ===================================================================== */
+function boot() {
+  fillIcons();
+  if (gs && gs.history && gs.history.setChangeHandler) {
+    gs.history.setChangeHandler(function (ev) { S.route = parseRoute(ev.location.hash); S.panel = null; closeDialog(); render(); });
+  }
+  var start = new Promise(function (resolve) {
+    if (gs && gs.url && gs.url.getLocation) gs.url.getLocation(function (loc) { resolve(loc.hash); });
+    else resolve('');
+  });
+  Promise.all([start, server('apiLoad')]).then(function (r) {
+    S.route = parseRoute(r[0]);
+    setData(r[1]);
+    render();
+  }, function (e) {
+    $('#main').innerHTML = '<div class="card" style="margin-top:40px"><div class="empty"><span class="empty-icon">' + icon('alert') + '</span><h2 class="title">The app could not load</h2><p class="body-2">' +
+      esc(errText(e)) + '</p><button class="btn btn-primary" data-act="retry">Try again</button></div></div>';
+  });
+}
+boot();
+})();
+</script>
