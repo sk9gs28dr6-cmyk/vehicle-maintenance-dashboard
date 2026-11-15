@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>Job Cost Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap" rel="stylesheet">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-tile" data-icon="ruler"></span>
+        <span class="brand-name">Job Cost Tracker</span>
+      </div>
+      <nav class="side-nav" id="sideNav"></nav>
+      <div class="side-foot">Press <span class="kbd">N</span> to add a cost</div>
+    </aside>
+    <main class="main" id="main">
+      <div class="boot"><span class="spin"></span> Loading your projects…</div>
+    </main>
+  </div>
+  <nav class="tabbar" id="tabbar"></nav>
+  <button class="fab" id="fab" data-act="add-cost" hidden><span data-icon="plus"></span>Add cost</button>
+  <div id="panelHost"></div>
+  <div id="dialogHost"></div>
+  <div class="toast-wrap" id="toasts" aria-live="polite"></div>
+  <?!= include('App'); ?>
+</body>
+</html>
